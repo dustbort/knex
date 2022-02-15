@@ -5,7 +5,7 @@
 //     For details and documentation:
 //     http://knexjs.org
 
-const knex = require('./lib/index');
+import knex from './lib/index';
 
 /**
  * These export configurations enable JS and TS developers

@@ -98,7 +98,10 @@
     ]
   },
   "devDependencies": {
+    "@types/debug": "^4.1.7",
+    "@types/lodash": "^4.14.178",
     "@types/node": "^16.11.22",
+    "@types/rechoir": "^0.6.1",
     "@vscode/sqlite3": "^5.0.7",
     "better-sqlite3": "^7.5.0",
     "chai": "^4.3.6",
