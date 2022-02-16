@@ -1,12 +1,14 @@
-const { EventEmitter } = require('events');
+import Client from "../client";
 
-const { Migrator } = require('../migrations/migrate/Migrator');
-const Seeder = require('../migrations/seed/Seeder');
-const FunctionHelper = require('./FunctionHelper');
-const QueryInterface = require('../query/method-constants');
-const merge = require('lodash/merge');
-const batchInsert = require('../execution/batch-insert');
-const { isObject } = require('../util/is');
+import { EventEmitter } from 'events';
+
+import { Migrator } from '../migrations/migrate/Migrator';
+import Seeder from '../migrations/seed/Seeder';
+import FunctionHelper from './FunctionHelper';
+import QueryInterface from '../query/method-constants';
+import merge from 'lodash/merge';
+import batchInsert from '../execution/batch-insert';
+import { isObject } from '../util/is';
 
 // Javascript does not officially support "callable objects".  Instead,
 // you must create a regular Function and inject properties/methods
@@ -94,7 +96,7 @@ for (const m of CONTEXT_METHODS) {
   };
 }
 
-export default function makeKnex(client) {
+export default function makeKnex(client: Client) {
   // The object we're potentially using to kick off an initial chain.
   function knex(tableName, options) {
     return createQueryBuilder(knex.context, tableName, options);
@@ -232,7 +234,7 @@ function _copyEventListeners(eventName, sourceKnex, targetKnex) {
   });
 }
 
-function redefineProperties(knex, client) {
+function redefineProperties(knex, client: Client) {
   // Allow chaining methods from the root object, before
   // any other information is specified.
   //

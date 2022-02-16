@@ -1,9 +1,9 @@
-const chunk = require('lodash/chunk');
-const flatten = require('lodash/flatten');
-const delay = require('./internal/delay');
-const { isNumber } = require('../util/is');
+import chunk from 'lodash/chunk';
+import flatten from 'lodash/flatten';
+import delay from './internal/delay';
+import { isNumber } from '../util/is';
 
-function batchInsert(client, tableName, batch, chunkSize = 1000) {
+export default function batchInsert(client, tableName, batch, chunkSize = 1000) {
   let returning = undefined;
   let transaction = null;
   if (!isNumber(chunkSize) || chunkSize < 1) {
@@ -47,5 +47,3 @@ function batchInsert(client, tableName, batch, chunkSize = 1000) {
     }
   );
 }
-
-module.exports = batchInsert;

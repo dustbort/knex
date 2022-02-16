@@ -75,8 +75,8 @@ export function addQueryContext(Target) {
   };
 }
 
-export function resolveClientNameWithAliases(clientName: keyof typeof CLIENT_ALIASES) {
-  return CLIENT_ALIASES[clientName] || clientName;
+export function resolveClientNameWithAliases(clientName: string) {
+  return CLIENT_ALIASES[clientName] ?? clientName;
 }
 
 export function toNumber(val: any, fallback: number) {

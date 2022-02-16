@@ -1,7 +1,8 @@
 import { parse } from 'pg-connection-string';
+import { Config } from '../../client';
 
 const parsePG = parse;
-const isWindows = process && process.platform && process.platform === 'win32';
+const isWindows = process?.platform === 'win32';
 
 function tryParse(str: string): URL | null {
   try {
@@ -11,7 +12,7 @@ function tryParse(str: string): URL | null {
   }
 }
 
-export default function parseConnectionString(str: string) {
+export default function parseConnectionString(str: string): Config {
   const parsed = tryParse(str);
   const isDriveLetter = isWindows && parsed?.protocol.length === 2;
   if (!parsed || isDriveLetter) {

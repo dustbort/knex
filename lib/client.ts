@@ -49,8 +49,12 @@ interface ConnectionConfig {
 }
 
 interface PoolConfig {
-  min?: number; max?: number;
-  afterCreate: (conn: Connection, done: (err: any, conn: Connection) => void) => void;
+  min?: number;
+  max?: number;
+  afterCreate: (
+    conn: Connection,
+    done: (err: any, conn: Connection) => void
+  ) => void;
 }
 
 interface MigrationsConfig {
@@ -64,8 +68,8 @@ interface LogConfig {
   debug: (message: string) => void;
 }
 
-interface Config {
-  client?: string;
+export interface Config {
+  client?: string | { new(...args: ConstructorParameters<typeof Client>): Client };
   version?: string;
   connection?: ConnectionConfig;
   pool?: PoolConfig;
@@ -74,10 +78,15 @@ interface Config {
   fetchAsString?: string[];
   migrations?: MigrationsConfig;
   postProcessResponse?: (result: any, queryContext: any) => any;
-  wrapIdentifier?: (value: string, origImpl: (value: any) => string, queryContext: any) => string;
+  wrapIdentifier?: (
+    value: string,
+    origImpl: (value: any) => string,
+    queryContext: any
+  ) => string;
   log?: LogConfig;
   useNullAsDefault?: boolean;
   debug?: boolean;
+  dialect?: string;
 }
 
 export default class Client extends EventEmitter {

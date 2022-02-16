@@ -1,9 +1,9 @@
 // The client names we'll allow in the `{name: lib}` pairing.
-export const CLIENT_ALIASES = Object.freeze({
+export const CLIENT_ALIASES: Record<string, string> = Object.freeze({
   pg: 'postgres',
   postgresql: 'postgres',
   sqlite: 'sqlite3',
-} as const);
+});
 
 export const SUPPORTED_CLIENTS = Object.freeze([
   'mssql',
@@ -16,8 +16,8 @@ export const SUPPORTED_CLIENTS = Object.freeze([
   'sqlite3',
   'cockroachdb',
   'better-sqlite3',
-  ...Object.keys(CLIENT_ALIASES) as (keyof typeof CLIENT_ALIASES)[],
-] as const);
+  ...Object.keys(CLIENT_ALIASES)[],
+]);
 
 export const DRIVER_NAMES = Object.freeze({
   MsSQL: 'mssql',

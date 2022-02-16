@@ -1,4 +1,7 @@
 // All properties we can use to start a query chain
+
+import Client from "../client";
+
 // from the `knex` object, e.g. `knex.select('*').from(...`
 export default [
   'with',
@@ -128,4 +131,4 @@ export default [
   'whereJsonNotSubsetOf',
   'orWhereJsonNotSubsetOf',
   'andWhereJsonNotSubsetOf',
-];
+] as (keyof Client)[];
