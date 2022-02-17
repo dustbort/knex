@@ -1,340 +1,693 @@
-import Client from "../client";
-
 import { EventEmitter } from 'events';
-
+import merge from 'lodash/merge';
+import Client from '../client';
+import batchInsert from '../execution/batch-insert';
+import Transaction from '../execution/transaction';
 import { Migrator } from '../migrations/migrate/Migrator';
 import Seeder from '../migrations/seed/Seeder';
-import FunctionHelper from './FunctionHelper';
-import QueryInterface from '../query/method-constants';
-import merge from 'lodash/merge';
-import batchInsert from '../execution/batch-insert';
+import Builder from '../query/querybuilder';
 import { isObject } from '../util/is';
+import FunctionHelper from './FunctionHelper';
 
-// Javascript does not officially support "callable objects".  Instead,
-// you must create a regular Function and inject properties/methods
-// into it.  In other words: you can't leverage Prototype Inheritance
-// to share the property/method definitions.
-//
-// To work around this, we're creating an Object Property Definition.
-// This allow us to quickly inject everything into the `knex` function
-// via the `Object.defineProperties(..)` function.  More importantly,
-// it allows the same definitions to be shared across `knex` instances.
-const KNEX_PROPERTY_DEFINITIONS = {
-  client: {
-    get() {
-      return this.context.client;
-    },
-    set(client) {
-      this.context.client = client;
-    },
-    configurable: true,
-  },
+type FunctionKeys<T> = {
+  [K in keyof T]: T[K] extends Function ? K : never;
+}[keyof T];
+const bind = <T, K extends FunctionKeys<T>>(t: T, k: K): T[K] =>
+  (t[k] as unknown as Function).bind(t);
 
-  userParams: {
-    get() {
-      return this.context.userParams;
-    },
-    set(userParams) {
-      this.context.userParams = userParams;
-    },
-    configurable: true,
-  },
+type NotFunction<T> = {
+  [K in keyof T]: T[K] extends Function ? never : K;
+}[keyof T];
+type OmitNotFunction<T> = Omit<T, NotFunction<T>>;
 
-  schema: {
-    get() {
-      return this.client.schemaBuilder();
-    },
-    configurable: true,
-  },
+class KnexContext {
+  client: Client;
+  userParams: Record<string, any> = {};
 
-  migrate: {
-    get() {
-      return new Migrator(this);
-    },
-    configurable: true,
-  },
-
-  seed: {
-    get() {
-      return new Seeder(this);
-    },
-    configurable: true,
-  },
-
-  fn: {
-    get() {
-      return new FunctionHelper(this.client);
-    },
-    configurable: true,
-  },
-};
-
-// `knex` instances serve as proxies around `context` objects.  So, calling
-// any of these methods on the `knex` instance will forward the call to
-// the `knex.context` object. This ensures that `this` will correctly refer
-// to `context` within each of these methods.
-const CONTEXT_METHODS = [
-  'raw',
-  'batchInsert',
-  'transaction',
-  'transactionProvider',
-  'initialize',
-  'destroy',
-  'ref',
-  'withUserParams',
-  'queryBuilder',
-  'disableProcessing',
-  'enableProcessing',
-];
-
-for (const m of CONTEXT_METHODS) {
-  KNEX_PROPERTY_DEFINITIONS[m] = {
-    value: function (...args) {
-      return this.context[m](...args);
-    },
-    configurable: true,
-  };
-}
-
-export default function makeKnex(client: Client) {
-  // The object we're potentially using to kick off an initial chain.
-  function knex(tableName, options) {
-    return createQueryBuilder(knex.context, tableName, options);
+  constructor(client: Client) {
+    this.client = client;
   }
 
-  redefineProperties(knex, client);
-  return knex;
-}
-
-function initContext(knexFn) {
-  const knexContext = knexFn.context || {};
-  Object.assign(knexContext, {
-    queryBuilder() {
-      return this.client.queryBuilder();
-    },
-
-    raw() {
-      return this.client.raw.apply(this.client, arguments);
-    },
-
-    batchInsert(table, batch, chunkSize = 1000) {
-      return batchInsert(this, table, batch, chunkSize);
-    },
-
-    // Creates a new transaction.
-    // If container is provided, returns a promise for when the transaction is resolved.
-    // If container is not provided, returns a promise with a transaction that is resolved
-    // when transaction is ready to be used.
-    transaction(container, _config) {
-      // Overload support of `transaction(config)`
-      if (!_config && isObject(container)) {
-        _config = container;
-        container = null;
-      }
-
-      const config = Object.assign({}, _config);
-      config.userParams = this.userParams || {};
-      if (config.doNotRejectOnRollback === undefined) {
-        config.doNotRejectOnRollback = true;
-      }
-
-      return this._transaction(container, config);
-    },
-
-    // Internal method that actually establishes the Transaction.  It makes no assumptions
-    // about the `config` or `outerTx`, and expects the caller to handle these details.
-    _transaction(container, config, outerTx = null) {
-      if (container) {
-        const trx = this.client.transaction(container, config, outerTx);
-        return trx;
-      } else {
-        return new Promise((resolve, reject) => {
-          this.client.transaction(resolve, config, outerTx).catch(reject);
-        });
-      }
-    },
-
-    transactionProvider(config) {
-      let trx;
-      return () => {
-        if (!trx) {
-          trx = this.transaction(undefined, config);
-        }
-        return trx;
-      };
-    },
-
-    // Typically never needed, initializes the pool for a knex client.
-    initialize(config) {
-      return this.client.initializePool(config);
-    },
-
-    // Convenience method for tearing down the pool.
-    destroy(callback) {
-      return this.client.destroy(callback);
-    },
-
-    ref(ref) {
-      return this.client.ref(ref);
-    },
-
-    // Do not document this as public API until naming and API is improved for general consumption
-    // This method exists to disable processing of internal queries in migrations
-    disableProcessing() {
-      if (this.userParams.isProcessingDisabled) {
-        return;
-      }
-      this.userParams.wrapIdentifier = this.client.config.wrapIdentifier;
-      this.userParams.postProcessResponse =
-        this.client.config.postProcessResponse;
-      this.client.config.wrapIdentifier = null;
-      this.client.config.postProcessResponse = null;
-      this.userParams.isProcessingDisabled = true;
-    },
-
-    // Do not document this as public API until naming and API is improved for general consumption
-    // This method exists to enable execution of non-internal queries with consistent identifier naming in migrations
-    enableProcessing() {
-      if (!this.userParams.isProcessingDisabled) {
-        return;
-      }
-      this.client.config.wrapIdentifier = this.userParams.wrapIdentifier;
-      this.client.config.postProcessResponse =
-        this.userParams.postProcessResponse;
-      this.userParams.isProcessingDisabled = false;
-    },
-
-    withUserParams(params) {
-      const knexClone = shallowCloneFunction(knexFn); // We need to include getters in our clone
-      if (this.client) {
-        knexClone.client = Object.create(this.client.constructor.prototype); // Clone client to avoid leaking listeners that are set on it
-        merge(knexClone.client, this.client);
-        knexClone.client.config = Object.assign({}, this.client.config); // Clone client config to make sure they can be modified independently
-      }
-
-      redefineProperties(knexClone, knexClone.client);
-      _copyEventListeners('query', knexFn, knexClone);
-      _copyEventListeners('query-error', knexFn, knexClone);
-      _copyEventListeners('query-response', knexFn, knexClone);
-      _copyEventListeners('start', knexFn, knexClone);
-      knexClone.userParams = params;
-      return knexClone;
-    },
-  });
-
-  if (!knexFn.context) {
-    knexFn.context = knexContext;
+  get queryBuilder() {
+    return bind(this.client, 'queryBuilder');
   }
-}
 
-function _copyEventListeners(eventName, sourceKnex, targetKnex) {
-  const listeners = sourceKnex.listeners(eventName);
-  listeners.forEach((listener) => {
-    targetKnex.on(eventName, listener);
-  });
-}
+  get raw() {
+    return bind(this.client, 'raw');
+  }
 
-function redefineProperties(knex, client: Client) {
-  // Allow chaining methods from the root object, before
-  // any other information is specified.
-  //
-  // TODO: `QueryBuilder.extend(..)` allows new QueryBuilder
-  //       methods to be introduced via external components.
-  //       As a side-effect, it also pushes the new method names
-  //       into the `QueryInterface` array.
-  //
-  //       The Problem: due to the way the code is currently
-  //       structured, these new methods cannot be retroactively
-  //       injected into existing `knex` instances!  As a result,
-  //       some `knex` instances will support the methods, and
-  //       others will not.
-  //
-  //       We should revisit this once we figure out the desired
-  //       behavior / usage.  For instance: do we really want to
-  //       allow external components to directly manipulate `knex`
-  //       data structures?  Or, should we come up w/ a different
-  //       approach that avoids side-effects / mutation?
-  //
-  //      (FYI: I noticed this issue because I attempted to integrate
-  //       this logic directly into the `KNEX_PROPERTY_DEFINITIONS`
-  //       construction.  However, `KNEX_PROPERTY_DEFINITIONS` is
-  //       constructed before any `knex` instances are created.
-  //       As a result, the method extensions were missing from all
-  //       `knex` instances.)
-  for (let i = 0; i < QueryInterface.length; i++) {
-    const method = QueryInterface[i];
-    knex[method] = function () {
-      const builder = this.queryBuilder();
-      return builder[method].apply(builder, arguments);
+  batchInsert(table, batch, chunkSize = 1000) {
+    return batchInsert(this, table, batch, chunkSize);
+  }
+
+  // Internal method that actually establishes the Transaction.  It makes no assumptions
+  // about the `config` or `outerTx`, and expects the caller to handle these details.
+  private _transaction(container, config, outerTx = null) {
+    if (container) {
+      return this.client.transaction(container, config, outerTx);
+    } else {
+      return new Promise((resolve, reject) => {
+        this.client.transaction(resolve, config, outerTx).catch(reject);
+      });
+    }
+  }
+
+  // Creates a new transaction.
+  // If container is provided, returns a promise for when the transaction is resolved.
+  // If container is not provided, returns a promise with a transaction that is resolved
+  // when transaction is ready to be used.
+  transaction(config): Transaction | Promise<unknown>;
+  transaction(container, config): Transaction | Promise<unknown>;
+  transaction(container, _config?) {
+    // Overload support of `transaction(config)`
+    if (!_config && isObject(container)) {
+      _config = container;
+      container = null;
+    }
+
+    const config = {
+      ..._config,
+      userParams: this.userParams,
+      doNotRejectOnRollback: _config.doNotRejectOnRollback ?? true,
     };
+
+    return this._transaction(container, config);
   }
 
-  Object.defineProperties(knex, KNEX_PROPERTY_DEFINITIONS);
-
-  initContext(knex);
-  knex.client = client;
-  knex.userParams = {};
-
-  // Hook up the "knex" object as an EventEmitter.
-  const ee = new EventEmitter();
-  for (const key in ee) {
-    knex[key] = ee[key];
+  transactionProvider(config) {
+    let trx: Transaction | Promise<unknown>;
+    return () => (trx ??= this.transaction(undefined, config));
   }
 
-  // Unfortunately, something seems to be broken in Node 6 and removing events from a clone also mutates original Knex,
-  // which is highly undesirable
-  if (knex._internalListeners) {
-    knex._internalListeners.forEach(({ eventName, listener }) => {
-      knex.client.removeListener(eventName, listener); // Remove duplicates for copies
+  // Typically never needed, initializes the pool for a knex client.
+  initialize(config) {
+    return this.client.initializePool(config);
+  }
+
+  // Convenience method for tearing down the pool.
+  destroy(callback) {
+    return this.client.destroy(callback);
+  }
+
+  ref(ref) {
+    return this.client.ref(ref);
+  }
+
+  // Do not document this as public API until naming and API is improved for general consumption
+  // This method exists to disable processing of internal queries in migrations
+  disableProcessing() {
+    if (this.userParams.isProcessingDisabled) {
+      return;
+    }
+    this.userParams.wrapIdentifier = this.client.config.wrapIdentifier;
+    this.userParams.postProcessResponse =
+      this.client.config.postProcessResponse;
+    this.client.config.wrapIdentifier = null;
+    this.client.config.postProcessResponse = null;
+    this.userParams.isProcessingDisabled = true;
+  }
+
+  // Do not document this as public API until naming and API is improved for general consumption
+  // This method exists to enable execution of non-internal queries with consistent identifier naming in migrations
+  enableProcessing() {
+    if (!this.userParams.isProcessingDisabled) {
+      return;
+    }
+    this.client.config.wrapIdentifier = this.userParams.wrapIdentifier;
+    this.client.config.postProcessResponse =
+      this.userParams.postProcessResponse;
+    this.userParams.isProcessingDisabled = false;
+  }
+}
+
+class KnexFacade<E = {}> extends EventEmitter {
+  extensions: Record<string, Function> = {};
+
+  constructor(private context: KnexContext) {
+    super();
+
+    this.addInternalListener('start', (obj) => {
+      this.emit('start', obj);
+    });
+    this.addInternalListener('query', (obj) => {
+      this.emit('query', obj);
+    });
+    this.addInternalListener('query-error', (err, obj) => {
+      this.emit('query-error', err, obj);
+    });
+    this.addInternalListener('query-response', (response, obj, builder) => {
+      this.emit('query-response', response, obj, builder);
+    });
+
+    const proxy: this = new Proxy(this, {
+      apply: (target, thisArg, [tableName, options]) =>
+        target.createQueryBuilder(tableName, options),
+      get: (target, key: any) => {
+        if (key in this.extensions) {
+          return this.extensions[key].bind(this.queryBuilder());
+        } else {
+          const val = (target as any)[key];
+          if (typeof val === 'function') {
+            return val.bind(proxy);
+          } else {
+            return val;
+          }
+        }
+      },
+    });
+    return proxy;
+  }
+
+  private createQueryBuilder(tableName: string, options) {
+    const qb = this.queryBuilder();
+    if (!tableName)
+      this.client.logger.warn(
+        'calling knex without a tableName is deprecated. Use knex.queryBuilder() instead.'
+      );
+    return tableName ? qb.table(tableName, options) : qb;
+  }
+
+  /**
+   * @deprecated Use the `extend` method directly on the `knex` facade instance
+   */
+  get QueryBuilder() {
+    return this;
+  }
+
+  extend<M extends string, T extends any[], U>(
+    methodName: M,
+    fn?: (...args: T) => U
+  ): KnexFacade<OmitNotFunction<E & { [K in M]: (...args: T) => U }>>;
+  extend<M extends { [x: string]: Function | undefined }>(
+    methods: M
+  ): KnexFacade<OmitNotFunction<E & M>>;
+  extend(
+    method: string | { [x: string]: Function | undefined },
+    fn?: Function
+  ) {
+    const methods = typeof method === 'string' ? { [method]: fn } : method;
+    for (const methodName of Object.keys(methods)) {
+      if (methodName in this || methodName in this.queryBuilder()) {
+        throw new Error(
+          `Cannot extend with existing method ('${methodName}').`
+        );
+      }
+    }
+    for (const [methodName, fn] of Object.entries(methods)) {
+      if (!fn) delete this.extensions[methodName];
+      else this.extensions[methodName] = fn;
+    }
+    return this;
+  }
+
+  get client() {
+    return this.context.client;
+  }
+  set client(client) {
+    this.context.client = client;
+  }
+
+  get userParams() {
+    return this.context.userParams;
+  }
+  set userParams(userParams) {
+    this.context.userParams = userParams;
+  }
+
+  get schema() {
+    return this.client.schemaBuilder();
+  }
+
+  get migrate() {
+    return new Migrator(this);
+  }
+
+  get seed() {
+    return new Seeder(this);
+  }
+
+  get fn() {
+    return new FunctionHelper(this.client);
+  }
+
+  //#region context forwards
+  queryBuilder(): Builder<E> {
+    const proxy: Builder<E> = new Proxy(this.context.queryBuilder(), {
+      get: (target, key: any) => {
+        if (key in this.extensions) {
+          return this.extensions[key].bind(proxy);
+        } else {
+          const val = (target as any)[key];
+          if (typeof val === 'function') {
+            return val.bind(proxy);
+          } else {
+            return val;
+          }
+        }
+      },
+    });
+    return proxy;
+  }
+  get raw() {
+    return bind(this.context, 'raw');
+  }
+  get batchInsert() {
+    return bind(this.context, 'batchInsert');
+  }
+  get transaction() {
+    return bind(this.context, 'transaction');
+  }
+  get transactionProvider() {
+    return bind(this.context, 'transactionProvider');
+  }
+  get initialize() {
+    return bind(this.context, 'initialize');
+  }
+  get destroy() {
+    return bind(this.context, 'destroy');
+  }
+  get ref() {
+    return bind(this.context, 'ref');
+  }
+  get disableProcessing() {
+    return bind(this.context, 'disableProcessing');
+  }
+  get enableProcessing() {
+    return bind(this.context, 'enableProcessing');
+  }
+  //#endregion context fowards
+
+  //#region query builder forwards
+  get with() {
+    return bind(this.queryBuilder(), 'with');
+  }
+  get withRecursive() {
+    return bind(this.queryBuilder(), 'withRecursive');
+  }
+  get withMaterialized() {
+    return bind(this.queryBuilder(), 'withMaterialized');
+  }
+  get withNotMaterialized() {
+    return bind(this.queryBuilder(), 'withNotMaterialized');
+  }
+  get select() {
+    return bind(this.queryBuilder(), 'select');
+  }
+  get as() {
+    return bind(this.queryBuilder(), 'as');
+  }
+  get columns() {
+    return bind(this.queryBuilder(), 'columns');
+  }
+  get column() {
+    return bind(this.queryBuilder(), 'column');
+  }
+  get from() {
+    return bind(this.queryBuilder(), 'from');
+  }
+  get fromJS() {
+    return bind(this.queryBuilder(), 'fromJS');
+  }
+  get fromRaw() {
+    return bind(this.queryBuilder(), 'fromRaw');
+  }
+  get into() {
+    return bind(this.queryBuilder(), 'into');
+  }
+  get withSchema() {
+    return bind(this.queryBuilder(), 'withSchema');
+  }
+  get table() {
+    return bind(this.queryBuilder(), 'table');
+  }
+  get distinct() {
+    return bind(this.queryBuilder(), 'distinct');
+  }
+  get join() {
+    return bind(this.queryBuilder(), 'join');
+  }
+  get joinRaw() {
+    return bind(this.queryBuilder(), 'joinRaw');
+  }
+  get innerJoin() {
+    return bind(this.queryBuilder(), 'innerJoin');
+  }
+  get leftJoin() {
+    return bind(this.queryBuilder(), 'leftJoin');
+  }
+  get leftOuterJoin() {
+    return bind(this.queryBuilder(), 'leftOuterJoin');
+  }
+  get rightJoin() {
+    return bind(this.queryBuilder(), 'rightJoin');
+  }
+  get rightOuterJoin() {
+    return bind(this.queryBuilder(), 'rightOuterJoin');
+  }
+  get outerJoin() {
+    return bind(this.queryBuilder(), 'outerJoin');
+  }
+  get fullOuterJoin() {
+    return bind(this.queryBuilder(), 'fullOuterJoin');
+  }
+  get crossJoin() {
+    return bind(this.queryBuilder(), 'crossJoin');
+  }
+  get where() {
+    return bind(this.queryBuilder(), 'where');
+  }
+  get whereLike() {
+    return bind(this.queryBuilder(), 'whereLike');
+  }
+  get whereILike() {
+    return bind(this.queryBuilder(), 'whereILike');
+  }
+  get andWhere() {
+    return bind(this.queryBuilder(), 'andWhere');
+  }
+  get orWhere() {
+    return bind(this.queryBuilder(), 'orWhere');
+  }
+  get whereNot() {
+    return bind(this.queryBuilder(), 'whereNot');
+  }
+  get orWhereNot() {
+    return bind(this.queryBuilder(), 'orWhereNot');
+  }
+  get whereRaw() {
+    return bind(this.queryBuilder(), 'whereRaw');
+  }
+  get whereWrapped() {
+    return bind(this.queryBuilder(), 'whereWrapped');
+  }
+  get havingWrapped() {
+    return bind(this.queryBuilder(), 'havingWrapped');
+  }
+  get orWhereRaw() {
+    return bind(this.queryBuilder(), 'orWhereRaw');
+  }
+  get whereExists() {
+    return bind(this.queryBuilder(), 'whereExists');
+  }
+  get orWhereExists() {
+    return bind(this.queryBuilder(), 'orWhereExists');
+  }
+  get whereNotExists() {
+    return bind(this.queryBuilder(), 'whereNotExists');
+  }
+  get orWhereNotExists() {
+    return bind(this.queryBuilder(), 'orWhereNotExists');
+  }
+  get whereIn() {
+    return bind(this.queryBuilder(), 'whereIn');
+  }
+  get orWhereIn() {
+    return bind(this.queryBuilder(), 'orWhereIn');
+  }
+  get whereNotIn() {
+    return bind(this.queryBuilder(), 'whereNotIn');
+  }
+  get orWhereNotIn() {
+    return bind(this.queryBuilder(), 'orWhereNotIn');
+  }
+  get whereNull() {
+    return bind(this.queryBuilder(), 'whereNull');
+  }
+  get orWhereNull() {
+    return bind(this.queryBuilder(), 'orWhereNull');
+  }
+  get whereNotNull() {
+    return bind(this.queryBuilder(), 'whereNotNull');
+  }
+  get orWhereNotNull() {
+    return bind(this.queryBuilder(), 'orWhereNotNull');
+  }
+  get whereBetween() {
+    return bind(this.queryBuilder(), 'whereBetween');
+  }
+  get whereNotBetween() {
+    return bind(this.queryBuilder(), 'whereNotBetween');
+  }
+  get andWhereBetween() {
+    return bind(this.queryBuilder(), 'andWhereBetween');
+  }
+  get andWhereNotBetween() {
+    return bind(this.queryBuilder(), 'andWhereNotBetween');
+  }
+  get orWhereBetween() {
+    return bind(this.queryBuilder(), 'orWhereBetween');
+  }
+  get orWhereNotBetween() {
+    return bind(this.queryBuilder(), 'orWhereNotBetween');
+  }
+  get groupBy() {
+    return bind(this.queryBuilder(), 'groupBy');
+  }
+  get groupByRaw() {
+    return bind(this.queryBuilder(), 'groupByRaw');
+  }
+  get orderBy() {
+    return bind(this.queryBuilder(), 'orderBy');
+  }
+  get orderByRaw() {
+    return bind(this.queryBuilder(), 'orderByRaw');
+  }
+  get union() {
+    return bind(this.queryBuilder(), 'union');
+  }
+  get unionAll() {
+    return bind(this.queryBuilder(), 'unionAll');
+  }
+  get intersect() {
+    return bind(this.queryBuilder(), 'intersect');
+  }
+  get having() {
+    return bind(this.queryBuilder(), 'having');
+  }
+  get havingRaw() {
+    return bind(this.queryBuilder(), 'havingRaw');
+  }
+  get orHaving() {
+    return bind(this.queryBuilder(), 'orHaving');
+  }
+  get orHavingRaw() {
+    return bind(this.queryBuilder(), 'orHavingRaw');
+  }
+  get offset() {
+    return bind(this.queryBuilder(), 'offset');
+  }
+  get limit() {
+    return bind(this.queryBuilder(), 'limit');
+  }
+  get count() {
+    return bind(this.queryBuilder(), 'count');
+  }
+  get countDistinct() {
+    return bind(this.queryBuilder(), 'countDistinct');
+  }
+  get min() {
+    return bind(this.queryBuilder(), 'min');
+  }
+  get max() {
+    return bind(this.queryBuilder(), 'max');
+  }
+  get sum() {
+    return bind(this.queryBuilder(), 'sum');
+  }
+  get sumDistinct() {
+    return bind(this.queryBuilder(), 'sumDistinct');
+  }
+  get avg() {
+    return bind(this.queryBuilder(), 'avg');
+  }
+  get avgDistinct() {
+    return bind(this.queryBuilder(), 'avgDistinct');
+  }
+  get increment() {
+    return bind(this.queryBuilder(), 'increment');
+  }
+  get decrement() {
+    return bind(this.queryBuilder(), 'decrement');
+  }
+  get first() {
+    return bind(this.queryBuilder(), 'first');
+  }
+  get debug() {
+    return bind(this.queryBuilder(), 'debug');
+  }
+  get pluck() {
+    return bind(this.queryBuilder(), 'pluck');
+  }
+  get clearSelect() {
+    return bind(this.queryBuilder(), 'clearSelect');
+  }
+  get clearWhere() {
+    return bind(this.queryBuilder(), 'clearWhere');
+  }
+  get clearGroup() {
+    return bind(this.queryBuilder(), 'clearGroup');
+  }
+  get clearOrder() {
+    return bind(this.queryBuilder(), 'clearOrder');
+  }
+  get clearHaving() {
+    return bind(this.queryBuilder(), 'clearHaving');
+  }
+  get insert() {
+    return bind(this.queryBuilder(), 'insert');
+  }
+  get update() {
+    return bind(this.queryBuilder(), 'update');
+  }
+  get returning() {
+    return bind(this.queryBuilder(), 'returning');
+  }
+  get del() {
+    return bind(this.queryBuilder(), 'del');
+  }
+  get delete() {
+    return bind(this.queryBuilder(), 'delete');
+  }
+  get truncate() {
+    return bind(this.queryBuilder(), 'truncate');
+  }
+  get transacting() {
+    return bind(this.queryBuilder(), 'transacting');
+  }
+  get connection() {
+    return bind(this.queryBuilder(), 'connection');
+  }
+  // JSON methods
+  // Json manipulation functions
+  get jsonExtract() {
+    return bind(this.queryBuilder(), 'jsonExtract');
+  }
+  get jsonSet() {
+    return bind(this.queryBuilder(), 'jsonSet');
+  }
+  get jsonInsert() {
+    return bind(this.queryBuilder(), 'jsonInsert');
+  }
+  get jsonRemove() {
+    return bind(this.queryBuilder(), 'jsonRemove');
+  }
+  // Wheres Json
+  get whereJsonObject() {
+    return bind(this.queryBuilder(), 'whereJsonObject');
+  }
+  get orWhereJsonObject() {
+    return bind(this.queryBuilder(), 'orWhereJsonObject');
+  }
+  get andWhereJsonObject() {
+    return bind(this.queryBuilder(), 'andWhereJsonObject');
+  }
+  get whereNotJsonObject() {
+    return bind(this.queryBuilder(), 'whereNotJsonObject');
+  }
+  get orWhereNotJsonObject() {
+    return bind(this.queryBuilder(), 'orWhereNotJsonObject');
+  }
+  get andWhereNotJsonObject() {
+    return bind(this.queryBuilder(), 'andWhereNotJsonObject');
+  }
+  get whereJsonPath() {
+    return bind(this.queryBuilder(), 'whereJsonPath');
+  }
+  get orWhereJsonPath() {
+    return bind(this.queryBuilder(), 'orWhereJsonPath');
+  }
+  get andWhereJsonPath() {
+    return bind(this.queryBuilder(), 'andWhereJsonPath');
+  }
+  get whereJsonSupersetOf() {
+    return bind(this.queryBuilder(), 'whereJsonSupersetOf');
+  }
+  get orWhereJsonSupersetOf() {
+    return bind(this.queryBuilder(), 'orWhereJsonSupersetOf');
+  }
+  get andWhereJsonSupersetOf() {
+    return bind(this.queryBuilder(), 'andWhereJsonSupersetOf');
+  }
+  get whereJsonNotSupersetOf() {
+    return bind(this.queryBuilder(), 'whereJsonNotSupersetOf');
+  }
+  get orWhereJsonNotSupersetOf() {
+    return bind(this.queryBuilder(), 'orWhereJsonNotSupersetOf');
+  }
+  get andWhereJsonNotSupersetOf() {
+    return bind(this.queryBuilder(), 'andWhereJsonNotSupersetOf');
+  }
+  get whereJsonSubsetOf() {
+    return bind(this.queryBuilder(), 'whereJsonSubsetOf');
+  }
+  get orWhereJsonSubsetOf() {
+    return bind(this.queryBuilder(), 'orWhereJsonSubsetOf');
+  }
+  get andWhereJsonSubsetOf() {
+    return bind(this.queryBuilder(), 'andWhereJsonSubsetOf');
+  }
+  get whereJsonNotSubsetOf() {
+    return bind(this.queryBuilder(), 'whereJsonNotSubsetOf');
+  }
+  get orWhereJsonNotSubsetOf() {
+    return bind(this.queryBuilder(), 'orWhereJsonNotSubsetOf');
+  }
+  get andWhereJsonNotSubsetOf() {
+    return bind(this.queryBuilder(), 'andWhereJsonNotSubsetOf');
+  }
+  //#endregion query builder forwards
+
+  //#region event emitter
+  private internalListeners: {
+    eventName: string;
+    listener: (...args: any[]) => void;
+  }[] = [];
+
+  private addInternalListener(
+    eventName: string,
+    listener: (...args: any[]) => void
+  ) {
+    this.client.on(eventName, listener);
+    this.internalListeners.push({ eventName, listener });
+  }
+
+  private copyEventListeners(eventName: string, target: EventEmitter) {
+    const listeners = this.listeners(eventName);
+    listeners.forEach((listener) => {
+      target.on(eventName, listener as (...args: any[]) => void);
     });
   }
-  knex._internalListeners = [];
+  //#endregion event emitter
 
-  // Passthrough all "start" and "query" events to the knex object.
-  _addInternalListener(knex, 'start', (obj) => {
-    knex.emit('start', obj);
-  });
-  _addInternalListener(knex, 'query', (obj) => {
-    knex.emit('query', obj);
-  });
-  _addInternalListener(knex, 'query-error', (err, obj) => {
-    knex.emit('query-error', err, obj);
-  });
-  _addInternalListener(knex, 'query-response', (response, obj, builder) => {
-    knex.emit('query-response', response, obj, builder);
-  });
+  withUserParams(params): this {
+    let client: Client;
+    // TODO: Why should client be allowed to be undefined?
+    if (this.client) {
+      client = Object.create(this.client.constructor.prototype); // Clone client to avoid leaking listeners that are set on it
+      merge(client, this.client);
+      client.config = { ...this.client.config }; // Clone client config to make sure they can be modified independently
+    }
+    const contextCtor = this.context.constructor as new (
+      client: Client
+    ) => KnexContext;
+    const context = new contextCtor(client);
+    const facadeCtor = this.constructor as new (context: KnexContext) => this;
+    const facade = new facadeCtor(context);
+
+    this.copyEventListeners('query', facade);
+    this.copyEventListeners('query-error', facade);
+    this.copyEventListeners('query-response', facade);
+    this.copyEventListeners('start', facade);
+    facade.userParams = params;
+    return facade;
+  }
 }
 
-function _addInternalListener(knex, eventName, listener) {
-  knex.client.on(eventName, listener);
-  knex._internalListeners.push({
-    eventName,
-    listener,
-  });
-}
-
-function createQueryBuilder(knexContext, tableName, options) {
-  const qb = knexContext.queryBuilder();
-  if (!tableName)
-    knexContext.client.logger.warn(
-      'calling knex without a tableName is deprecated. Use knex.queryBuilder() instead.'
-    );
-  return tableName ? qb.table(tableName, options) : qb;
-}
-
-function shallowCloneFunction(originalFunction) {
-  const fnContext = Object.create(
-    Object.getPrototypeOf(originalFunction),
-    Object.getOwnPropertyDescriptors(originalFunction)
-  );
-
-  const knexContext = {};
-  const knexFnWrapper = (tableName, options) => {
-    return createQueryBuilder(knexContext, tableName, options);
+export default function makeFacade(client: Client) {
+  // TODO: Why do we need two layers?
+  const context = new KnexContext(client);
+  const facade = new KnexFacade(context) as KnexFacade & {
+    (tableName: string, options: any): Builder;
   };
-
-  const clonedFunction = knexFnWrapper.bind(fnContext);
-  Object.assign(clonedFunction, originalFunction);
-  clonedFunction.context = knexContext;
-  return clonedFunction;
+  return facade;
 }
