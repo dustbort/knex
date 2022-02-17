@@ -9,16 +9,22 @@ import Builder from '../query/querybuilder';
 import { isObject } from '../util/is';
 import FunctionHelper from './FunctionHelper';
 
-type FunctionKeys<T> = {
-  [K in keyof T]: T[K] extends Function ? K : never;
-}[keyof T];
-const bind = <T, K extends FunctionKeys<T>>(t: T, k: K): T[K] =>
-  (t[k] as unknown as Function).bind(t);
-
 type NotFunction<T> = {
   [K in keyof T]: T[K] extends Function ? never : K;
 }[keyof T];
 type OmitNotFunction<T> = Omit<T, NotFunction<T>>;
+
+type FacadeExtension<E> = KnexFacade<E> & E;
+type BuilderExtension<E> = Builder<E> & E;
+
+export default function makeFacade(client: Client) {
+  // TODO: Why do we need two layers?
+  const context = new KnexContext(client);
+  const facade = new KnexFacade(context) as KnexFacade & {
+    (tableName: string, options: any): Builder;
+  };
+  return facade;
+}
 
 class KnexContext {
   client: Client;
@@ -120,7 +126,7 @@ class KnexContext {
   }
 }
 
-class KnexFacade<E = {}> extends EventEmitter {
+class KnexFacade<E = void> extends EventEmitter {
   extensions: Record<string, Function> = {};
 
   constructor(private context: KnexContext) {
@@ -177,14 +183,14 @@ class KnexFacade<E = {}> extends EventEmitter {
   extend<M extends string, T extends any[], U>(
     methodName: M,
     fn?: (...args: T) => U
-  ): KnexFacade<OmitNotFunction<E & { [K in M]: (...args: T) => U }>>;
+  ): FacadeExtension<OmitNotFunction<E & { [K in M]: (...args: T) => U }>>;
   extend<M extends { [x: string]: Function | undefined }>(
     methods: M
-  ): KnexFacade<OmitNotFunction<E & M>>;
+  ): FacadeExtension<OmitNotFunction<E & M>>;
   extend(
     method: string | { [x: string]: Function | undefined },
     fn?: Function
-  ) {
+  ): any {
     const methods = typeof method === 'string' ? { [method]: fn } : method;
     for (const methodName of Object.keys(methods)) {
       if (methodName in this || methodName in this.queryBuilder()) {
@@ -231,8 +237,8 @@ class KnexFacade<E = {}> extends EventEmitter {
   }
 
   //#region context forwards
-  queryBuilder(): Builder<E> {
-    const proxy: Builder<E> = new Proxy(this.context.queryBuilder(), {
+  queryBuilder(): BuilderExtension<E> {
+    const proxy: any = new Proxy(this.context.queryBuilder(), {
       get: (target, key: any) => {
         if (key in this.extensions) {
           return this.extensions[key].bind(proxy);
@@ -249,391 +255,509 @@ class KnexFacade<E = {}> extends EventEmitter {
     return proxy;
   }
   get raw() {
-    return bind(this.context, 'raw');
+    return this.context.raw.bind(this.context);
   }
   get batchInsert() {
-    return bind(this.context, 'batchInsert');
+    return this.context.batchInsert.bind(this.context);
   }
   get transaction() {
-    return bind(this.context, 'transaction');
+    return this.context.transaction.bind(this.context);
   }
   get transactionProvider() {
-    return bind(this.context, 'transactionProvider');
+    return this.context.transactionProvider.bind(this.context);
   }
   get initialize() {
-    return bind(this.context, 'initialize');
+    return this.context.initialize.bind(this.context);
   }
   get destroy() {
-    return bind(this.context, 'destroy');
+    return this.context.destroy.bind(this.context);
   }
   get ref() {
-    return bind(this.context, 'ref');
+    return this.context.ref.bind(this.context);
   }
   get disableProcessing() {
-    return bind(this.context, 'disableProcessing');
+    return this.context.disableProcessing.bind(this.context);
   }
   get enableProcessing() {
-    return bind(this.context, 'enableProcessing');
+    return this.context.enableProcessing.bind(this.context);
   }
   //#endregion context fowards
 
   //#region query builder forwards
   get with() {
-    return bind(this.queryBuilder(), 'with');
+    const qb = this.queryBuilder();
+    return qb.with.bind(qb);
   }
   get withRecursive() {
-    return bind(this.queryBuilder(), 'withRecursive');
+    const qb = this.queryBuilder();
+    return qb.withRecursive.bind(qb);
   }
   get withMaterialized() {
-    return bind(this.queryBuilder(), 'withMaterialized');
+    const qb = this.queryBuilder();
+    return qb.withMaterialized.bind(qb);
   }
   get withNotMaterialized() {
-    return bind(this.queryBuilder(), 'withNotMaterialized');
+    const qb = this.queryBuilder();
+    return qb.withNotMaterialized.bind(qb);
   }
   get select() {
-    return bind(this.queryBuilder(), 'select');
+    const qb = this.queryBuilder();
+    return qb.select.bind(qb);
   }
   get as() {
-    return bind(this.queryBuilder(), 'as');
+    const qb = this.queryBuilder();
+    return qb.as.bind(qb);
   }
   get columns() {
-    return bind(this.queryBuilder(), 'columns');
+    const qb = this.queryBuilder();
+    return qb.columns.bind(qb);
   }
   get column() {
-    return bind(this.queryBuilder(), 'column');
+    const qb = this.queryBuilder();
+    return qb.column.bind(qb);
   }
   get from() {
-    return bind(this.queryBuilder(), 'from');
+    const qb = this.queryBuilder();
+    return qb.from.bind(qb);
   }
   get fromJS() {
-    return bind(this.queryBuilder(), 'fromJS');
+    const qb = this.queryBuilder();
+    return qb.fromJS.bind(qb);
   }
   get fromRaw() {
-    return bind(this.queryBuilder(), 'fromRaw');
+    const qb = this.queryBuilder();
+    return qb.fromRaw.bind(qb);
   }
   get into() {
-    return bind(this.queryBuilder(), 'into');
+    const qb = this.queryBuilder();
+    return qb.into.bind(qb);
   }
   get withSchema() {
-    return bind(this.queryBuilder(), 'withSchema');
+    const qb = this.queryBuilder();
+    return qb.withSchema.bind(qb);
   }
   get table() {
-    return bind(this.queryBuilder(), 'table');
+    const qb = this.queryBuilder();
+    return qb.table.bind(qb);
   }
   get distinct() {
-    return bind(this.queryBuilder(), 'distinct');
+    const qb = this.queryBuilder();
+    return qb.distinct.bind(qb);
   }
   get join() {
-    return bind(this.queryBuilder(), 'join');
+    const qb = this.queryBuilder();
+    return qb.join.bind(qb);
   }
   get joinRaw() {
-    return bind(this.queryBuilder(), 'joinRaw');
+    const qb = this.queryBuilder();
+    return qb.joinRaw.bind(qb);
   }
   get innerJoin() {
-    return bind(this.queryBuilder(), 'innerJoin');
+    const qb = this.queryBuilder();
+    return qb.innerJoin.bind(qb);
   }
   get leftJoin() {
-    return bind(this.queryBuilder(), 'leftJoin');
+    const qb = this.queryBuilder();
+    return qb.leftJoin.bind(qb);
   }
   get leftOuterJoin() {
-    return bind(this.queryBuilder(), 'leftOuterJoin');
+    const qb = this.queryBuilder();
+    return qb.leftOuterJoin.bind(qb);
   }
   get rightJoin() {
-    return bind(this.queryBuilder(), 'rightJoin');
+    const qb = this.queryBuilder();
+    return qb.rightJoin.bind(qb);
   }
   get rightOuterJoin() {
-    return bind(this.queryBuilder(), 'rightOuterJoin');
+    const qb = this.queryBuilder();
+    return qb.rightOuterJoin.bind(qb);
   }
   get outerJoin() {
-    return bind(this.queryBuilder(), 'outerJoin');
+    const qb = this.queryBuilder();
+    return qb.outerJoin.bind(qb);
   }
   get fullOuterJoin() {
-    return bind(this.queryBuilder(), 'fullOuterJoin');
+    const qb = this.queryBuilder();
+    return qb.fullOuterJoin.bind(qb);
   }
   get crossJoin() {
-    return bind(this.queryBuilder(), 'crossJoin');
+    const qb = this.queryBuilder();
+    return qb.crossJoin.bind(qb);
   }
   get where() {
-    return bind(this.queryBuilder(), 'where');
+    const qb = this.queryBuilder();
+    return qb.where.bind(qb);
   }
   get whereLike() {
-    return bind(this.queryBuilder(), 'whereLike');
+    const qb = this.queryBuilder();
+    return qb.whereLike.bind(qb);
   }
   get whereILike() {
-    return bind(this.queryBuilder(), 'whereILike');
+    const qb = this.queryBuilder();
+    return qb.whereILike.bind(qb);
   }
   get andWhere() {
-    return bind(this.queryBuilder(), 'andWhere');
+    const qb = this.queryBuilder();
+    return qb.andWhere.bind(qb);
   }
   get orWhere() {
-    return bind(this.queryBuilder(), 'orWhere');
+    const qb = this.queryBuilder();
+    return qb.orWhere.bind(qb);
   }
   get whereNot() {
-    return bind(this.queryBuilder(), 'whereNot');
+    const qb = this.queryBuilder();
+    return qb.whereNot.bind(qb);
   }
   get orWhereNot() {
-    return bind(this.queryBuilder(), 'orWhereNot');
+    const qb = this.queryBuilder();
+    return qb.orWhereNot.bind(qb);
   }
   get whereRaw() {
-    return bind(this.queryBuilder(), 'whereRaw');
+    const qb = this.queryBuilder();
+    return qb.whereRaw.bind(qb);
   }
   get whereWrapped() {
-    return bind(this.queryBuilder(), 'whereWrapped');
+    const qb = this.queryBuilder();
+    return qb.whereWrapped.bind(qb);
   }
   get havingWrapped() {
-    return bind(this.queryBuilder(), 'havingWrapped');
+    const qb = this.queryBuilder();
+    return qb.havingWrapped.bind(qb);
   }
   get orWhereRaw() {
-    return bind(this.queryBuilder(), 'orWhereRaw');
+    const qb = this.queryBuilder();
+    return qb.orWhereRaw.bind(qb);
   }
   get whereExists() {
-    return bind(this.queryBuilder(), 'whereExists');
+    const qb = this.queryBuilder();
+    return qb.whereExists.bind(qb);
   }
   get orWhereExists() {
-    return bind(this.queryBuilder(), 'orWhereExists');
+    const qb = this.queryBuilder();
+    return qb.orWhereExists.bind(qb);
   }
   get whereNotExists() {
-    return bind(this.queryBuilder(), 'whereNotExists');
+    const qb = this.queryBuilder();
+    return qb.whereNotExists.bind(qb);
   }
   get orWhereNotExists() {
-    return bind(this.queryBuilder(), 'orWhereNotExists');
+    const qb = this.queryBuilder();
+    return qb.orWhereNotExists.bind(qb);
   }
   get whereIn() {
-    return bind(this.queryBuilder(), 'whereIn');
+    const qb = this.queryBuilder();
+    return qb.whereIn.bind(qb);
   }
   get orWhereIn() {
-    return bind(this.queryBuilder(), 'orWhereIn');
+    const qb = this.queryBuilder();
+    return qb.orWhereIn.bind(qb);
   }
   get whereNotIn() {
-    return bind(this.queryBuilder(), 'whereNotIn');
+    const qb = this.queryBuilder();
+    return qb.whereNotIn.bind(qb);
   }
   get orWhereNotIn() {
-    return bind(this.queryBuilder(), 'orWhereNotIn');
+    const qb = this.queryBuilder();
+    return qb.orWhereNotIn.bind(qb);
   }
   get whereNull() {
-    return bind(this.queryBuilder(), 'whereNull');
+    const qb = this.queryBuilder();
+    return qb.whereNull.bind(qb);
   }
   get orWhereNull() {
-    return bind(this.queryBuilder(), 'orWhereNull');
+    const qb = this.queryBuilder();
+    return qb.orWhereNull.bind(qb);
   }
   get whereNotNull() {
-    return bind(this.queryBuilder(), 'whereNotNull');
+    const qb = this.queryBuilder();
+    return qb.whereNotNull.bind(qb);
   }
   get orWhereNotNull() {
-    return bind(this.queryBuilder(), 'orWhereNotNull');
+    const qb = this.queryBuilder();
+    return qb.orWhereNotNull.bind(qb);
   }
   get whereBetween() {
-    return bind(this.queryBuilder(), 'whereBetween');
+    const qb = this.queryBuilder();
+    return qb.whereBetween.bind(qb);
   }
   get whereNotBetween() {
-    return bind(this.queryBuilder(), 'whereNotBetween');
+    const qb = this.queryBuilder();
+    return qb.whereNotBetween.bind(qb);
   }
   get andWhereBetween() {
-    return bind(this.queryBuilder(), 'andWhereBetween');
+    const qb = this.queryBuilder();
+    return qb.andWhereBetween.bind(qb);
   }
   get andWhereNotBetween() {
-    return bind(this.queryBuilder(), 'andWhereNotBetween');
+    const qb = this.queryBuilder();
+    return qb.andWhereNotBetween.bind(qb);
   }
   get orWhereBetween() {
-    return bind(this.queryBuilder(), 'orWhereBetween');
+    const qb = this.queryBuilder();
+    return qb.orWhereBetween.bind(qb);
   }
   get orWhereNotBetween() {
-    return bind(this.queryBuilder(), 'orWhereNotBetween');
+    const qb = this.queryBuilder();
+    return qb.orWhereNotBetween.bind(qb);
   }
   get groupBy() {
-    return bind(this.queryBuilder(), 'groupBy');
+    const qb = this.queryBuilder();
+    return qb.groupBy.bind(qb);
   }
   get groupByRaw() {
-    return bind(this.queryBuilder(), 'groupByRaw');
+    const qb = this.queryBuilder();
+    return qb.groupByRaw.bind(qb);
   }
   get orderBy() {
-    return bind(this.queryBuilder(), 'orderBy');
+    const qb = this.queryBuilder();
+    return qb.orderBy.bind(qb);
   }
   get orderByRaw() {
-    return bind(this.queryBuilder(), 'orderByRaw');
+    const qb = this.queryBuilder();
+    return qb.orderByRaw.bind(qb);
   }
   get union() {
-    return bind(this.queryBuilder(), 'union');
+    const qb = this.queryBuilder();
+    return qb.union.bind(qb);
   }
   get unionAll() {
-    return bind(this.queryBuilder(), 'unionAll');
+    const qb = this.queryBuilder();
+    return qb.unionAll.bind(qb);
   }
   get intersect() {
-    return bind(this.queryBuilder(), 'intersect');
+    const qb = this.queryBuilder();
+    return qb.intersect.bind(qb);
   }
   get having() {
-    return bind(this.queryBuilder(), 'having');
+    const qb = this.queryBuilder();
+    return qb.having.bind(qb);
   }
   get havingRaw() {
-    return bind(this.queryBuilder(), 'havingRaw');
+    const qb = this.queryBuilder();
+    return qb.havingRaw.bind(qb);
   }
   get orHaving() {
-    return bind(this.queryBuilder(), 'orHaving');
+    const qb = this.queryBuilder();
+    return qb.orHaving.bind(qb);
   }
   get orHavingRaw() {
-    return bind(this.queryBuilder(), 'orHavingRaw');
+    const qb = this.queryBuilder();
+    return qb.orHavingRaw.bind(qb);
   }
   get offset() {
-    return bind(this.queryBuilder(), 'offset');
+    const qb = this.queryBuilder();
+    return qb.offset.bind(qb);
   }
   get limit() {
-    return bind(this.queryBuilder(), 'limit');
+    const qb = this.queryBuilder();
+    return qb.limit.bind(qb);
   }
   get count() {
-    return bind(this.queryBuilder(), 'count');
+    const qb = this.queryBuilder();
+    return qb.count.bind(qb);
   }
   get countDistinct() {
-    return bind(this.queryBuilder(), 'countDistinct');
+    const qb = this.queryBuilder();
+    return qb.countDistinct.bind(qb);
   }
   get min() {
-    return bind(this.queryBuilder(), 'min');
+    const qb = this.queryBuilder();
+    return qb.min.bind(qb);
   }
   get max() {
-    return bind(this.queryBuilder(), 'max');
+    const qb = this.queryBuilder();
+    return qb.max.bind(qb);
   }
   get sum() {
-    return bind(this.queryBuilder(), 'sum');
+    const qb = this.queryBuilder();
+    return qb.sum.bind(qb);
   }
   get sumDistinct() {
-    return bind(this.queryBuilder(), 'sumDistinct');
+    const qb = this.queryBuilder();
+    return qb.sumDistinct.bind(qb);
   }
   get avg() {
-    return bind(this.queryBuilder(), 'avg');
+    const qb = this.queryBuilder();
+    return qb.avg.bind(qb);
   }
   get avgDistinct() {
-    return bind(this.queryBuilder(), 'avgDistinct');
+    const qb = this.queryBuilder();
+    return qb.avgDistinct.bind(qb);
   }
   get increment() {
-    return bind(this.queryBuilder(), 'increment');
+    const qb = this.queryBuilder();
+    return qb.increment.bind(qb);
   }
   get decrement() {
-    return bind(this.queryBuilder(), 'decrement');
+    const qb = this.queryBuilder();
+    return qb.decrement.bind(qb);
   }
   get first() {
-    return bind(this.queryBuilder(), 'first');
+    const qb = this.queryBuilder();
+    return qb.first.bind(qb);
   }
   get debug() {
-    return bind(this.queryBuilder(), 'debug');
+    const qb = this.queryBuilder();
+    return qb.debug.bind(qb);
   }
   get pluck() {
-    return bind(this.queryBuilder(), 'pluck');
+    const qb = this.queryBuilder();
+    return qb.pluck.bind(qb);
   }
   get clearSelect() {
-    return bind(this.queryBuilder(), 'clearSelect');
+    const qb = this.queryBuilder();
+    return qb.clearSelect.bind(qb);
   }
   get clearWhere() {
-    return bind(this.queryBuilder(), 'clearWhere');
+    const qb = this.queryBuilder();
+    return qb.clearWhere.bind(qb);
   }
   get clearGroup() {
-    return bind(this.queryBuilder(), 'clearGroup');
+    const qb = this.queryBuilder();
+    return qb.clearGroup.bind(qb);
   }
   get clearOrder() {
-    return bind(this.queryBuilder(), 'clearOrder');
+    const qb = this.queryBuilder();
+    return qb.clearOrder.bind(qb);
   }
   get clearHaving() {
-    return bind(this.queryBuilder(), 'clearHaving');
+    const qb = this.queryBuilder();
+    return qb.clearHaving.bind(qb);
   }
   get insert() {
-    return bind(this.queryBuilder(), 'insert');
+    const qb = this.queryBuilder();
+    return qb.insert.bind(qb);
   }
   get update() {
-    return bind(this.queryBuilder(), 'update');
+    const qb = this.queryBuilder();
+    return qb.update.bind(qb);
   }
   get returning() {
-    return bind(this.queryBuilder(), 'returning');
+    const qb = this.queryBuilder();
+    return qb.returning.bind(qb);
   }
   get del() {
-    return bind(this.queryBuilder(), 'del');
+    const qb = this.queryBuilder();
+    return qb.del.bind(qb);
   }
   get delete() {
-    return bind(this.queryBuilder(), 'delete');
+    const qb = this.queryBuilder();
+    return qb.delete.bind(qb);
   }
   get truncate() {
-    return bind(this.queryBuilder(), 'truncate');
+    const qb = this.queryBuilder();
+    return qb.truncate.bind(qb);
   }
   get transacting() {
-    return bind(this.queryBuilder(), 'transacting');
+    const qb = this.queryBuilder();
+    return qb.transacting.bind(qb);
   }
   get connection() {
-    return bind(this.queryBuilder(), 'connection');
+    const qb = this.queryBuilder();
+    return qb.connection.bind(qb);
   }
   // JSON methods
   // Json manipulation functions
   get jsonExtract() {
-    return bind(this.queryBuilder(), 'jsonExtract');
+    const qb = this.queryBuilder();
+    return qb.jsonExtract.bind(qb);
   }
   get jsonSet() {
-    return bind(this.queryBuilder(), 'jsonSet');
+    const qb = this.queryBuilder();
+    return qb.jsonSet.bind(qb);
   }
   get jsonInsert() {
-    return bind(this.queryBuilder(), 'jsonInsert');
+    const qb = this.queryBuilder();
+    return qb.jsonInsert.bind(qb);
   }
   get jsonRemove() {
-    return bind(this.queryBuilder(), 'jsonRemove');
+    const qb = this.queryBuilder();
+    return qb.jsonRemove.bind(qb);
   }
   // Wheres Json
   get whereJsonObject() {
-    return bind(this.queryBuilder(), 'whereJsonObject');
+    const qb = this.queryBuilder();
+    return qb.whereJsonObject.bind(qb);
   }
   get orWhereJsonObject() {
-    return bind(this.queryBuilder(), 'orWhereJsonObject');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonObject.bind(qb);
   }
   get andWhereJsonObject() {
-    return bind(this.queryBuilder(), 'andWhereJsonObject');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonObject.bind(qb);
   }
   get whereNotJsonObject() {
-    return bind(this.queryBuilder(), 'whereNotJsonObject');
+    const qb = this.queryBuilder();
+    return qb.whereNotJsonObject.bind(qb);
   }
   get orWhereNotJsonObject() {
-    return bind(this.queryBuilder(), 'orWhereNotJsonObject');
+    const qb = this.queryBuilder();
+    return qb.orWhereNotJsonObject.bind(qb);
   }
   get andWhereNotJsonObject() {
-    return bind(this.queryBuilder(), 'andWhereNotJsonObject');
+    const qb = this.queryBuilder();
+    return qb.andWhereNotJsonObject.bind(qb);
   }
   get whereJsonPath() {
-    return bind(this.queryBuilder(), 'whereJsonPath');
+    const qb = this.queryBuilder();
+    return qb.whereJsonPath.bind(qb);
   }
   get orWhereJsonPath() {
-    return bind(this.queryBuilder(), 'orWhereJsonPath');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonPath.bind(qb);
   }
   get andWhereJsonPath() {
-    return bind(this.queryBuilder(), 'andWhereJsonPath');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonPath.bind(qb);
   }
   get whereJsonSupersetOf() {
-    return bind(this.queryBuilder(), 'whereJsonSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.whereJsonSupersetOf.bind(qb);
   }
   get orWhereJsonSupersetOf() {
-    return bind(this.queryBuilder(), 'orWhereJsonSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonSupersetOf.bind(qb);
   }
   get andWhereJsonSupersetOf() {
-    return bind(this.queryBuilder(), 'andWhereJsonSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonSupersetOf.bind(qb);
   }
   get whereJsonNotSupersetOf() {
-    return bind(this.queryBuilder(), 'whereJsonNotSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.whereJsonNotSupersetOf.bind(qb);
   }
   get orWhereJsonNotSupersetOf() {
-    return bind(this.queryBuilder(), 'orWhereJsonNotSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonNotSupersetOf.bind(qb);
   }
   get andWhereJsonNotSupersetOf() {
-    return bind(this.queryBuilder(), 'andWhereJsonNotSupersetOf');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonNotSupersetOf.bind(qb);
   }
   get whereJsonSubsetOf() {
-    return bind(this.queryBuilder(), 'whereJsonSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.whereJsonSubsetOf.bind(qb);
   }
   get orWhereJsonSubsetOf() {
-    return bind(this.queryBuilder(), 'orWhereJsonSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonSubsetOf.bind(qb);
   }
   get andWhereJsonSubsetOf() {
-    return bind(this.queryBuilder(), 'andWhereJsonSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonSubsetOf.bind(qb);
   }
   get whereJsonNotSubsetOf() {
-    return bind(this.queryBuilder(), 'whereJsonNotSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.whereJsonNotSubsetOf.bind(qb);
   }
   get orWhereJsonNotSubsetOf() {
-    return bind(this.queryBuilder(), 'orWhereJsonNotSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.orWhereJsonNotSubsetOf.bind(qb);
   }
   get andWhereJsonNotSubsetOf() {
-    return bind(this.queryBuilder(), 'andWhereJsonNotSubsetOf');
+    const qb = this.queryBuilder();
+    return qb.andWhereJsonNotSubsetOf.bind(qb);
   }
   //#endregion query builder forwards
 
@@ -667,27 +791,20 @@ class KnexFacade<E = {}> extends EventEmitter {
       merge(client, this.client);
       client.config = { ...this.client.config }; // Clone client config to make sure they can be modified independently
     }
-    const contextCtor = this.context.constructor as new (
-      client: Client
-    ) => KnexContext;
-    const context = new contextCtor(client);
-    const facadeCtor = this.constructor as new (context: KnexContext) => this;
-    const facade = new facadeCtor(context);
+
+    const facade = makeFacade(client);
 
     this.copyEventListeners('query', facade);
     this.copyEventListeners('query-error', facade);
     this.copyEventListeners('query-response', facade);
     this.copyEventListeners('start', facade);
+
+    facade.extensions = { ...this.extensions }; 
+
     facade.userParams = params;
+
     return facade;
   }
 }
 
-export default function makeFacade(client: Client) {
-  // TODO: Why do we need two layers?
-  const context = new KnexContext(client);
-  const facade = new KnexFacade(context) as KnexFacade & {
-    (tableName: string, options: any): Builder;
-  };
-  return facade;
-}
+

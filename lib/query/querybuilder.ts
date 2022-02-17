@@ -66,7 +66,7 @@ type JoinType =
 
 // Typically called from `knex.builder`,
 // start a new query building chain.
-export default class Builder<E = {}> extends EventEmitter {
+export default class Builder<E = void> extends EventEmitter {
   and: Builder;
   private _single: {
     as?: unknown;
