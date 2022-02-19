@@ -2,20 +2,22 @@
 
 // Table Compiler
 // -------
-const {
+import {
   pushAdditional,
   pushQuery,
   unshiftQuery,
-} = require('./internal/helpers');
-const helpers = require('../util/helpers');
-const groupBy = require('lodash/groupBy');
-const indexOf = require('lodash/indexOf');
-const isEmpty = require('lodash/isEmpty');
-const tail = require('lodash/tail');
-const { normalizeArr } = require('../util/helpers');
+} from './internal/helpers';
+import * as helpers from '../util/helpers';
+import groupBy from 'lodash/groupBy';
+import indexOf from 'lodash/indexOf';
+import isEmpty from 'lodash/isEmpty';
+import tail from 'lodash/tail';
+import { normalizeArr } from '../util/helpers';
+import Client from '../client';
+import TableBuilder from './tablebuilder';
 
 export default class TableCompiler {
-  constructor(client, tableBuilder) {
+  constructor(client: Client, tableBuilder: TableBuilder) {
     this.client = client;
     this.tableBuilder = tableBuilder;
     this._commonBuilder = this.tableBuilder;

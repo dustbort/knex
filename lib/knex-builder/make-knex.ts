@@ -5,28 +5,35 @@ import batchInsert from '../execution/batch-insert';
 import Transaction from '../execution/transaction';
 import { Migrator } from '../migrations/migrate/Migrator';
 import Seeder from '../migrations/seed/Seeder';
-import Builder from '../query/querybuilder';
+import QueryBuilder from '../query/querybuilder';
 import { isObject } from '../util/is';
 import FunctionHelper from './FunctionHelper';
 
-type NotFunction<T> = {
-  [K in keyof T]: T[K] extends Function ? never : K;
-}[keyof T];
-type OmitNotFunction<T> = Omit<T, NotFunction<T>>;
+interface Options {
+  only: boolean;
+}
 
-type FacadeExtension<E> = KnexFacade<E> & E;
-type BuilderExtension<E> = Builder<E> & E;
+export type Callable<E extends Record<string, Function> = {}> = (
+  tableName: string,
+  options: Options
+) => BuilderExtension<E>;
+export type FacadeExtension<E extends Record<string, Function> = {}> =
+  KnexFacade<E> & E;
+export type BuilderExtension<E extends Record<string, Function> = {}> =
+  QueryBuilder<E> & E;
 
-export default function makeFacade(client: Client) {
+export default function makeFacade<E extends Record<string, Function>>(
+  client: Client,
+  extensions: E
+) {
   // TODO: Why do we need two layers?
   const context = new KnexContext(client);
-  const facade = new KnexFacade(context) as KnexFacade & {
-    (tableName: string, options: any): Builder;
-  };
+  const facade = new KnexFacade(context, extensions) as FacadeExtension<E> &
+    Callable<E>;
   return facade;
 }
 
-class KnexContext {
+export class KnexContext {
   client: Client;
   userParams: Record<string, any> = {};
 
@@ -35,14 +42,14 @@ class KnexContext {
   }
 
   get queryBuilder() {
-    return bind(this.client, 'queryBuilder');
+    return this.client.queryBuilder.bind(this.client);
   }
 
   get raw() {
-    return bind(this.client, 'raw');
+    return this.client.raw.bind(this.client);
   }
 
-  batchInsert(table, batch, chunkSize = 1000) {
+  batchInsert(table: string, batch: Record<string, any>[], chunkSize = 1000) {
     return batchInsert(this, table, batch, chunkSize);
   }
 
@@ -126,11 +133,19 @@ class KnexContext {
   }
 }
 
-class KnexFacade<E = void> extends EventEmitter {
-  extensions: Record<string, Function> = {};
-
-  constructor(private context: KnexContext) {
+export class KnexFacade<
+  E extends Record<string, Function>
+> extends EventEmitter {
+  constructor(private context: KnexContext, private extensions: E) {
     super();
+
+    for (const methodName of Object.keys(extensions)) {
+      if (methodName in this || methodName in this.queryBuilder()) {
+        throw new Error(
+          `Cannot extend with existing method ('${methodName}').`
+        );
+      }
+    }
 
     this.addInternalListener('start', (obj) => {
       this.emit('start', obj);
@@ -174,7 +189,7 @@ class KnexFacade<E = void> extends EventEmitter {
   }
 
   /**
-   * @deprecated Use the `extend` method directly on the `knex` facade instance
+   * @deprecated Pass in the extensions map with the config when initializing knex.
    */
   get QueryBuilder() {
     return this;
@@ -182,28 +197,13 @@ class KnexFacade<E = void> extends EventEmitter {
 
   extend<M extends string, T extends any[], U>(
     methodName: M,
-    fn?: (...args: T) => U
-  ): FacadeExtension<OmitNotFunction<E & { [K in M]: (...args: T) => U }>>;
-  extend<M extends { [x: string]: Function | undefined }>(
-    methods: M
-  ): FacadeExtension<OmitNotFunction<E & M>>;
-  extend(
-    method: string | { [x: string]: Function | undefined },
-    fn?: Function
-  ): any {
-    const methods = typeof method === 'string' ? { [method]: fn } : method;
-    for (const methodName of Object.keys(methods)) {
-      if (methodName in this || methodName in this.queryBuilder()) {
-        throw new Error(
-          `Cannot extend with existing method ('${methodName}').`
-        );
-      }
+    fn: (...args: T) => U
+  ): FacadeExtension<E & { [K in M]: (...args: T) => U }> {
+    if (methodName in this || methodName in this.queryBuilder()) {
+      throw new Error(`Cannot extend with existing method ('${methodName}').`);
     }
-    for (const [methodName, fn] of Object.entries(methods)) {
-      if (!fn) delete this.extensions[methodName];
-      else this.extensions[methodName] = fn;
-    }
-    return this;
+    Object.assign(this.extensions, { [methodName]: fn });
+    return this as any;
   }
 
   get client() {
@@ -783,7 +783,7 @@ class KnexFacade<E = void> extends EventEmitter {
   }
   //#endregion event emitter
 
-  withUserParams(params): this {
+  withUserParams(params: any) {
     let client: Client;
     // TODO: Why should client be allowed to be undefined?
     if (this.client) {
@@ -792,19 +792,15 @@ class KnexFacade<E = void> extends EventEmitter {
       client.config = { ...this.client.config }; // Clone client config to make sure they can be modified independently
     }
 
-    const facade = makeFacade(client);
+    const facade = makeFacade(client, { ...this.extensions });
 
     this.copyEventListeners('query', facade);
     this.copyEventListeners('query-error', facade);
     this.copyEventListeners('query-response', facade);
     this.copyEventListeners('start', facade);
 
-    facade.extensions = { ...this.extensions }; 
-
     facade.userParams = params;
 
     return facade;
   }
 }
-
-

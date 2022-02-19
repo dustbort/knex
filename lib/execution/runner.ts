@@ -1,4 +1,6 @@
 import type { Transform as StreamTransform } from 'stream';
+import { Builder } from '../types';
+import Client from '../client';
 import { KnexTimeoutError } from '../util/timeout';
 import { timeout } from '../util/timeout';
 import {
@@ -17,7 +19,7 @@ export default class Runner {
   // "run" is called.
   private connection?: unknown;
 
-  constructor(private client, private builder) {}
+  constructor(private client: Client, private builder: Builder) {}
 
   // "Run" the target, calling "toSQL" on the builder, returning
   // an object or array of queries to run, each of which are run on

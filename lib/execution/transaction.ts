@@ -1,13 +1,12 @@
 // Transaction
 // -------
-const { EventEmitter } = require('events');
-const Debug = require('debug');
-const uniqueId = require('lodash/uniqueId');
-const { callbackify } = require('util');
+import { EventEmitter } from 'events';
+import Debug from 'debug';
+import uniqueId from 'lodash/uniqueId';
+import { callbackify } from 'util';
 
-const makeKnex = require('../knex-builder/make-knex');
-const { timeout, KnexTimeoutError } = require('../util/timeout');
-const finallyMixin = require('../util/finally-mixin');
+import makeKnex from '../knex-builder/make-knex';
+import { timeout, KnexTimeoutError } from '../util/timeout';
 
 const debug = Debug('knex:tx');
 

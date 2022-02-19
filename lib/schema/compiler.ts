@@ -1,6 +1,7 @@
 import Client from '../client';
 import Formatter, { BindingHolder } from '../formatter';
-import Builder from '../query/querybuilder';
+import QueryBuilder from '../query/querybuilder';
+import SchemaBuilder from './builder';
 import {
   pushQuery,
   pushAdditional,
@@ -12,15 +13,15 @@ import {
 // properly formatted / bound query strings.
 export default class SchemaCompiler {
   client: Client;
-  builder: Builder;
-  private _commonBuilder: Builder;
-  schema: Builder['_schema'];
+  builder: SchemaBuilder;
+  private _commonBuilder: SchemaBuilder;
+  schema: SchemaBuilder['_schema'];
   bindings: unknown[]
   bindingsHolder: BindingHolder;
   formatter: Formatter;
   sequence: unknown[];
 
-  constructor(client: Client, builder: Builder) {
+  constructor(client: Client, builder: SchemaBuilder) {
     this.builder = builder;
     this._commonBuilder = this.builder;
     this.client = client;

@@ -1,3 +1,1 @@
-import Knex from './knex-builder/Knex';
-
-export default Knex;
+export { default } from './knex-builder/Knex';

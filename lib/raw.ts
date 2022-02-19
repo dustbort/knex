@@ -23,6 +23,7 @@ import { BindingHolder } from './formatter';
 const debugBindings = debug('knex:bindings');
 
 export default class Raw extends EventEmitter {
+  client: Client;
   sql: string;
   bindings: BindingHolder['bindings'];
   private _wrappedBefore: unknown;
@@ -34,9 +35,10 @@ export default class Raw extends EventEmitter {
   private _after?: unknown;
   private _options?: unknown;
 
-  constructor(private client: Client) {
+  constructor(client: Client) {
     super();
 
+    this.client = client;
     this.sql = '';
     this.bindings = [];
 
@@ -49,7 +51,7 @@ export default class Raw extends EventEmitter {
     }
   }
 
-  set(sql: string, bindings: BindingHolder['bindings']) {
+  set(sql: string, bindings: any) {
     this.sql = sql;
     this.bindings =
       (isObject(bindings) && !bindings.toSQL) || bindings === undefined

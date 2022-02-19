@@ -2,12 +2,14 @@
 
 // View Compiler
 // -------
-const { pushQuery } = require('./internal/helpers');
-const groupBy = require('lodash/groupBy');
-const { columnize: columnize_ } = require('../formatter/wrappingFormatter');
+import { pushQuery } from './internal/helpers';
+import groupBy from 'lodash/groupBy';
+import { columnize as columnize_ } from '../formatter/wrappingFormatter';
+import Client from '../client';
+import ViewBuilder from './viewbuilder';
 
 export default class ViewCompiler {
-  constructor(client, viewBuilder) {
+  constructor(client: Client, viewBuilder: ViewBuilder) {
     this.client = client;
     this.viewBuilder = viewBuilder;
     this._commonBuilder = this.viewBuilder;

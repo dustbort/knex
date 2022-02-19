@@ -1,7 +1,11 @@
-const _debugQuery = require('debug')('knex:query');
-const debugBindings = require('debug')('knex:bindings');
-const debugQuery = (sql, txId) => _debugQuery(sql.replace(/%/g, '%%'), txId);
-const { isString } = require('../../util/is');
+import Debug from 'debug';
+import Client from '../../client';
+import { Builder, Connection } from '../../types';
+import { isString } from '../../util/is';
+
+const _debugQuery = Debug('knex:query');
+const debugBindings = Debug('knex:bindings');
+const debugQuery = (sql: string, txId: string) => _debugQuery(sql.replace(/%/g, '%%'), txId);
 
 export function formatQuery(sql, bindings, timeZone, client) {
   bindings = bindings == null ? [] : [].concat(bindings);
@@ -18,8 +22,9 @@ export function formatQuery(sql, bindings, timeZone, client) {
   });
 }
 
-export function enrichQueryObject(connection, queryParam, client) {
-  const queryObject = isString(queryParam) ? { sql: queryParam } : queryParam;
+export function enrichQueryObject(connection, queryParam: string | Builder, client: Client) {
+  const queryObject: Builder = 
+    isString(queryParam) ? { sql: queryParam } : queryParam
 
   queryObject.bindings = client.prepBindings(queryObject.bindings);
   queryObject.sql = client.positionBindings(queryObject.sql);
@@ -33,7 +38,7 @@ export function enrichQueryObject(connection, queryParam, client) {
   return queryObject;
 }
 
-export function executeQuery(connection, queryObject, client) {
+export function executeQuery(connection: Connection, queryObject: Builder, client: Client) {
   return client._query(connection, queryObject).catch((err) => {
     err.message =
       formatQuery(queryObject.sql, queryObject.bindings, undefined, client) +

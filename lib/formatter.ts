@@ -23,7 +23,7 @@ export default class Formatter implements BindingHolder {
 
   // Puts the appropriate wrapper around a value depending on the database
   // engine, unless it's a knex.raw value, in which case it's left alone.
-  wrap(value: any, isParameter: boolean | undefined) {
+  wrap(value: any, isParameter?: boolean) {
     return wrap_(value, isParameter, this.builder, this.client, this);
   }
 }

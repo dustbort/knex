@@ -2,17 +2,21 @@ import * as helpers from '../util/helpers';
 import extend from 'lodash/extend';
 import Client from '../client';
 
+export type ViewBuilderMethod = 'alter';
+export type ViewBuilderViewName = string;
+export type ViewBuilderFn = Function;
+
 export default class ViewBuilder {
   client: Client;
   private _fn: unknown;
-  private _method: unknown;
-  private _schemaName?: unknown;
-  private _columns?: unknown;
+  private _method: ViewBuilderMethod;
+  private _schemaName?: string;
+  private _columns?: string[];
   private _viewName: unknown;
   private _statements: unknown[];
   private _single: unknown; 
 
-  constructor(client, method, viewName, fn) {
+  constructor(client: Client, method: ViewBuilderMethod, viewName: ViewBuilderViewName, fn: ViewBuilderFn) {
     this.client = client;
     this._method = method;
     this._schemaName = undefined;
@@ -23,11 +27,11 @@ export default class ViewBuilder {
     this._single = {};
   }
 
-  setSchema(schemaName) {
+  setSchema(schemaName: string) {
     this._schemaName = schemaName;
   }
 
-  columns(columns) {
+  columns(columns: string[]) {
     this._columns = columns;
   }
 
@@ -60,6 +64,10 @@ export default class ViewBuilder {
     this._fn.call(this, this);
     return this.client.viewCompiler(this).toSQL();
   }
+
+  get queryContext() {
+    return helpers.queryContext.bind(this);
+  }
 }
 
 const AlterMethods = {
@@ -86,4 +94,3 @@ const AlterMethods = {
   },
 };
 
-helpers.addQueryContext(ViewBuilder);

@@ -2,10 +2,20 @@ import chunk from 'lodash/chunk';
 import flatten from 'lodash/flatten';
 import delay from './internal/delay';
 import { isNumber } from '../util/is';
+import { KnexContext } from '../knex-builder/make-knex';
+import Transaction from './transaction';
 
-export default function batchInsert(client, tableName, batch, chunkSize = 1000) {
-  let returning = undefined;
-  let transaction = null;
+type Returning = string | string[];
+type Transacting = Transaction | Promise<unknown>;
+
+export default function batchInsert(
+  client: KnexContext,
+  tableName: string,
+  batch: Record<string, any>[],
+  chunkSize = 1000
+) {
+  let returning: Returning | undefined = undefined;
+  let transaction: Transacting | undefined = undefined;
   if (!isNumber(chunkSize) || chunkSize < 1) {
     throw new TypeError(`Invalid chunkSize: ${chunkSize}`);
   }
@@ -14,7 +24,7 @@ export default function batchInsert(client, tableName, batch, chunkSize = 1000) 
   }
   const chunks = chunk(batch, chunkSize);
 
-  const runInTransaction = (cb) => {
+  const runInTransaction = (cb: (tr: Transacting) => Transacting) => {
     if (transaction) {
       return cb(transaction);
     }
@@ -34,12 +44,12 @@ export default function batchInsert(client, tableName, batch, chunkSize = 1000) 
       });
     }),
     {
-      returning(columns) {
+      returning(columns: Returning) {
         returning = columns;
 
         return this;
       },
-      transacting(tr) {
+      transacting(tr: Transacting) {
         transaction = tr;
 
         return this;

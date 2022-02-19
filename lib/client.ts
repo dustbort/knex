@@ -15,7 +15,12 @@ import QueryBuilder from './query/querybuilder';
 import QueryCompiler from './query/querycompiler';
 import SchemaBuilder from './schema/builder';
 import SchemaCompiler from './schema/compiler';
-import TableBuilder from './schema/tablebuilder';
+import TableBuilder, {
+  TableBuilderFn,
+  TableBuilderMethod,
+  TableBuilderTableNameLike,
+  TableBuilderTableName,
+} from './schema/tablebuilder';
 import TableCompiler from './schema/tablecompiler';
 import ColumnBuilder from './schema/columnbuilder';
 import ColumnCompiler from './schema/columncompiler';
@@ -27,10 +32,15 @@ import Ref from './ref';
 import Formatter, { BindingHolder } from './formatter';
 import Logger from './logger';
 import { POOL_CONFIG_OPTIONS } from './constants';
-import ViewBuilder from './schema/viewbuilder';
+import ViewBuilder, {
+  ViewBuilderFn,
+  ViewBuilderMethod,
+  ViewBuilderViewName,
+} from './schema/viewbuilder';
 import ViewCompiler from './schema/viewcompiler';
 import isPlainObject from 'lodash/isPlainObject';
 import Debug from 'debug';
+import QueryBuilder from './query/querybuilder';
 
 const debug = Debug('knex:client');
 
@@ -51,10 +61,7 @@ interface ConnectionConfig {
 interface PoolConfig {
   min?: number;
   max?: number;
-  afterCreate: (
-    conn: Connection,
-    done: (err: any, conn: Connection) => void
-  ) => void;
+  afterCreate: (conn: unknown, done: (err: any, conn: unknown) => void) => void;
 }
 
 interface MigrationsConfig {
@@ -69,7 +76,9 @@ interface LogConfig {
 }
 
 export interface Config {
-  client?: string | { new(...args: ConstructorParameters<typeof Client>): Client };
+  client?:
+    | string
+    | { new (...args: ConstructorParameters<typeof Client>): Client };
   version?: string;
   connection?: ConnectionConfig;
   pool?: PoolConfig;
@@ -146,7 +155,7 @@ export default class Client extends EventEmitter {
     }
   }
 
-  formatter(builder: QueryBuilder) {
+  formatter(builder) {
     return new Formatter(this, builder);
   }
 
@@ -162,27 +171,36 @@ export default class Client extends EventEmitter {
     return new SchemaBuilder(this);
   }
 
-  schemaCompiler(builder) {
+  schemaCompiler(builder: SchemaBuilder) {
     return new SchemaCompiler(this, builder);
   }
 
-  tableBuilder(type, tableName, tableNameLike, fn) {
+  tableBuilder(
+    type: TableBuilderMethod,
+    tableName: TableBuilderTableName,
+    tableNameLike: TableBuilderTableNameLike,
+    fn: TableBuilderFn
+  ) {
     return new TableBuilder(this, type, tableName, tableNameLike, fn);
   }
 
-  viewBuilder(type, viewBuilder, fn) {
+  viewBuilder(
+    type: ViewBuilderMethod,
+    viewBuilder: ViewBuilderViewName,
+    fn: ViewBuilderFn
+  ) {
     return new ViewBuilder(this, type, viewBuilder, fn);
   }
 
-  tableCompiler(tableBuilder) {
+  tableCompiler(tableBuilder: TableBuilder) {
     return new TableCompiler(this, tableBuilder);
   }
 
-  viewCompiler(viewCompiler) {
-    return new ViewCompiler(this, viewCompiler);
+  viewCompiler(viewBuilder: ViewBuilder) {
+    return new ViewCompiler(this, viewBuilder);
   }
 
-  columnBuilder(tableBuilder, type, args) {
+  columnBuilder(tableBuilder: TableBuilder, type: string, args: any[]) {
     return new ColumnBuilder(this, tableBuilder, type, args);
   }
 
@@ -194,17 +212,18 @@ export default class Client extends EventEmitter {
     return new Runner(this, builder);
   }
 
-  transaction(container, config, outerTx) {
+  transaction(container, config?, outerTx?) {
     return new Transaction(this, container, config, outerTx);
   }
 
-  raw(...args) {
-    return new Raw(this).set(...args);
+  raw(sql: string, bindings?: any) {
+    return new Raw(this).set(sql, bindings);
   }
 
-  ref() {
-    return new Ref(this, ...arguments);
+  ref(ref: string) {
+    return new Ref(this, ref);
   }
+
   query(connection, queryParam) {
     const queryObject = enrichQueryObject(connection, queryParam, this);
     return executeQuery(connection, queryObject, this);
@@ -219,7 +238,7 @@ export default class Client extends EventEmitter {
     return bindings;
   }
 
-  positionBindings(sql) {
+  positionBindings(sql:) {
     return sql;
   }
 
@@ -230,7 +249,7 @@ export default class Client extends EventEmitter {
     return resp;
   }
 
-  wrapIdentifier(value, queryContext) {
+  wrapIdentifier(value: string, queryContext) {
     return this.customWrapIdentifier(
       value,
       this.wrapIdentifierImpl,
@@ -238,21 +257,21 @@ export default class Client extends EventEmitter {
     );
   }
 
-  customWrapIdentifier(value, origImpl, queryContext) {
+  customWrapIdentifier(value: string, origImpl: (value: any) => string, queryContext) {
     if (this.config.wrapIdentifier) {
       return this.config.wrapIdentifier(value, origImpl, queryContext);
     }
     return origImpl(value);
   }
 
-  wrapIdentifierImpl(value) {
+  wrapIdentifierImpl(value: string) {
     return value !== '*' ? `"${value.replace(/"/g, '""')}"` : '*';
   }
 
   initializeDriver() {
     try {
       this.driver = this._driver();
-    } catch (e) {
+    } catch (e: any) {
       const message = `Knex: run\n$ npm install ${this.driverName} --save`;
       this.logger.error(`${message}\n${e.message}\n${e.stack}`);
       throw new Error(`${message}\n${e.message}`);

@@ -1,7 +1,12 @@
+import Client from './client';
 import Raw from './raw';
 
 export default class Ref extends Raw {
-  constructor(client, ref) {
+  ref: string;
+  private _schema: string | null;
+  private _alias: string | null;
+
+  constructor(client: Client, ref: string) {
     super(client);
 
     this.ref = ref;
@@ -9,19 +14,19 @@ export default class Ref extends Raw {
     this._alias = null;
   }
 
-  withSchema(schema) {
+  withSchema(schema: string) {
     this._schema = schema;
 
     return this;
   }
 
-  as(alias) {
+  as(alias: string) {
     this._alias = alias;
 
     return this;
   }
 
-  toSQL() {
+  toSQL(method, tz) {
     const string = this._schema ? `${this._schema}.${this.ref}` : this.ref;
 
     const formatter = this.client.formatter(this);
@@ -32,6 +37,6 @@ export default class Ref extends Raw {
 
     this.set(sql, []);
 
-    return super.toSQL(...arguments);
+    return super.toSQL(method, tz);
   }
 }

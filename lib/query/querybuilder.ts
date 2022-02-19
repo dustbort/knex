@@ -64,15 +64,183 @@ type JoinType =
   | 'full outer'
   | 'cross';
 
-// Typically called from `knex.builder`,
-// start a new query building chain.
-export default class Builder<E = void> extends EventEmitter {
-  and: Builder;
+interface TimeoutOptions {
+  cancel?: boolean;
+}
+type Column = string | Record<string, string>;
+interface FromOptions {
+  only?: boolean;
+}
+
+type Statement =
+  | {
+      grouping: 'with';
+      type: 'withWrapped';
+      alias: string;
+      columnList?: Column[];
+      value: unknown;
+      materialized?: 'with';
+      recursive?: boolean;
+    }
+  | {
+      grouping: 'columns';
+      value: Column[];
+    }
+  | {
+      grouping: 'columns';
+      type: 'json';
+      method: 'jsonExtract';
+      params: [
+        column: string | QueryBuilder | Raw,
+        path: string,
+        alias?: string,
+        singleValue?: boolean
+      ][];
+    }
+  | {
+      grouping: 'columns';
+      type: 'json';
+      method: 'jsonSet' | 'jsonInsert';
+      column: string | QueryBuilder | Raw;
+      path: string;
+      value: any;
+      alias?: string;
+    }
+  | {
+      grouping: 'columns';
+      type: 'json';
+      method: 'jsonRemove';
+      column: string | QueryBuilder | Raw;
+      path: string;
+      alias?: string;
+    }
+  | {
+      grouping: 'hintComments';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereWrapped' | 'whereExists';
+      value: (qb: QueryBuilder) => void;
+      not: boolean;
+      bool: 'and' | 'or';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereRaw';
+      value: Raw;
+      not: boolean;
+      bool: 'and' | 'or';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereNull';
+      column: any;
+      not: boolean;
+      bool: 'and' | 'or';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereIn';
+      column: any;
+      value: any;
+      not: boolean;
+      bool: 'and' | 'or';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereBetween';
+      column: any;
+      value: [any, any];
+      not: boolean;
+      bool: 'and' | 'or';
+    }
+  | {
+      grouping: 'where';
+      type: 'whereBasic';
+      column: any;
+      operator: string;
+      value: any;
+      not: boolean;
+      bool: 'and' | 'or';
+      asColumn: boolean;
+    }
+  | {
+      grouping: 'where';
+      type: 'whereLike' | 'whereILike';
+      column: any;
+      value: any;
+      not: boolean;
+      bool: 'and' | 'or';
+      asColumn: boolean;
+    }
+  | {
+    grouping: 'where',
+    type: 'whereJsonObject',
+    column: any;
+    value: any;
+    not: boolean;
+    bool: 'and' | 'or';
+    asColumn: boolean;
+  }
+  | {
+    grouping: 'where',
+    type: 'whereJsonSupersetOf',
+    column: any,
+    value: any;
+    not: boolean;
+    bool: 'and' | 'or';
+    asColumn: boolean;
+  }
+  | {
+    grouping: 'where',
+    type: 'whereJsonSubsetOf',
+    column: any,
+    value: any;
+    not: boolean;
+    bool: 'and' | 'or';
+    asColumn: boolean;
+  }
+  | {
+    grouping: 'where';
+    type: 'whereJsonPath',
+    column: any,
+    value: any;
+    not: boolean;
+    bool: 'and' | 'or';
+    asColumn: boolean;
+    operator: string;
+    jsonPath: string;
+  }
+  | {
+      grouping: 'group';
+    }
+  | {
+      grouping: 'order';
+    }
+  | {
+      grouping: 'union';
+    }
+  | {
+      grouping: 'having';
+    };
+
+/**
+ * Typically called from `knex.builder`,
+ * start a new query building chain.
+ * @borrows QueryBuilder#columns as QueryBuilder#select
+ * @borrows QueryBuilder#columns as QueryBuilder#column
+ * @borrows QueryBuilder#table as QueryBuilder#from
+ * @borrows QueryBuilder#table as QueryBuilder#into
+ */
+export default class QueryBuilder<
+  E extends Record<string, Function> = {}
+> extends EventEmitter {
+  and: QueryBuilder;
   private _single: {
-    as?: unknown;
+    as?: string;
     schema?: string;
     /** Alias to "from" for select and "into" for insert statements */
-    table?: string;
+    table?: string | Raw;
     /**
     whether the query should use SQL's ONLY to not return
     inheriting table data. Defaults to false.
@@ -88,65 +256,66 @@ export default class Builder<E = void> extends EventEmitter {
     options?: unknown;
     lock?: keyof typeof lockMode;
     lockTables?: unknown[];
-    waitMode?: keyof typeof waitMode;\
+    waitMode?: keyof typeof waitMode;
 
     onConflict?: unknown; // columns
     ignore?: boolean;
-    merge?: { updates: unknown }
+    merge?: { updates: unknown };
   };
-  private _statements: {
-    grouping?:
-      | 'with'
-      | 'columns'
-      | 'hintComments'
-      | 'where'
-      | 'group'
-      | 'order'
-      | 'union'
-      | 'having';
-    type?:
-      | 'withWrapped'
-      | 'whereBasic'
-      | 'whereRaw'
-      | 'whereWrapped'
-      | 'whereExists'
-      | 'whereIn'
-      | 'whereNull'
-      | 'whereBetween'
-      | 'groupByRaw'
-      | 'groupByBasic'
-      | 'orderByBasic'
-      | 'havingBasic'
-      | 'havingWrapped'
-      | 'havingNull'
-      | 'havingExists'
-      | 'havingBetween'
-      | 'havingIn'
-      | 'havingRaw'
-      | 'pluck'
-      | 'json'
-      | 'aggregateRaw'
-      | 'aggregate';
-    alias?: string;
-    column?: any;
-    operator?: string;
-    columnList?: string[];
-    value?: any[];
-    materialized?: unknown;
-    recursive?: boolean;
-    distinct?: boolean;
-    distinctOn?: boolean;
-    not?: boolean;
-    bool?: 'and' | 'or';
-    asColumn?: boolean;
-    direction?: unknown;
-    nulls?: string;
-    clause?: unknown;
-    wrap?: boolean;
-    method?: string;
-    params?: any[];
-    aggregateDistinct?: boolean;
-  }[];
+  private _statements: Statement[] = [];
+  // private _statements: {
+  //   grouping?:
+  //     | 'with'
+  //     | 'columns'
+  //     | 'hintComments'
+  //     | 'where'
+  //     | 'group'
+  //     | 'order'
+  //     | 'union'
+  //     | 'having';
+  //   type?:
+  //     | 'withWrapped'
+  //     | 'whereBasic'
+  //     | 'whereRaw'
+  //     | 'whereWrapped'
+  //     | 'whereExists'
+  //     | 'whereIn'
+  //     | 'whereNull'
+  //     | 'whereBetween'
+  //     | 'groupByRaw'
+  //     | 'groupByBasic'
+  //     | 'orderByBasic'
+  //     | 'havingBasic'
+  //     | 'havingWrapped'
+  //     | 'havingNull'
+  //     | 'havingExists'
+  //     | 'havingBetween'
+  //     | 'havingIn'
+  //     | 'havingRaw'
+  //     | 'pluck'
+  //     | 'json'
+  //     | 'aggregateRaw'
+  //     | 'aggregate';
+  //   alias?: string;
+  //   column?: any;
+  //   operator?: string;
+  //   columnList?: string[];
+  //   value?: any[];
+  //   materialized?: unknown;
+  //   recursive?: boolean;
+  //   distinct?: boolean;
+  //   distinctOn?: boolean;
+  //   not?: boolean;
+  //   bool?: 'and' | 'or';
+  //   asColumn?: boolean;
+  //   direction?: unknown;
+  //   nulls?: string;
+  //   clause?: unknown;
+  //   wrap?: boolean;
+  //   method?: string;
+  //   params?: any[];
+  //   aggregateDistinct?: boolean;
+  // }[];
   private _method:
     | 'select'
     | 'first'
@@ -158,7 +327,7 @@ export default class Builder<E = void> extends EventEmitter {
     | 'columnInfo';
   private _debug?: boolean;
   private _joinFlag: JoinType;
-  private _boolFlag: 'and';
+  private _boolFlag: 'and' | 'or';
   private _notFlag: false;
   private _asColumnFlag = false;
   private _options?: unknown;
@@ -172,7 +341,6 @@ export default class Builder<E = void> extends EventEmitter {
     super();
     this.and = this;
     this._single = {};
-    this._statements = [];
     this._method = 'select';
     if (client.config) {
       saveAsyncStack(this, 5);
@@ -216,7 +384,7 @@ export default class Builder<E = void> extends EventEmitter {
     return cloned;
   }
 
-  timeout(ms: number, { cancel = undefined } = {}) {
+  timeout(ms: number, { cancel }: TimeoutOptions = {}) {
     if (isNumber(ms) && ms > 0) {
       this._timeout = ms;
       if (cancel) {
@@ -232,16 +400,24 @@ export default class Builder<E = void> extends EventEmitter {
   isValidStatementArg(statement: unknown) {
     return (
       typeof statement === 'function' ||
-      statement instanceof Builder ||
+      statement instanceof QueryBuilder ||
       statement instanceof Raw // statement?.isRawInstance
     );
   }
 
   private _validateWithArgs(
     alias: string,
-    statementOrColumnList,
-    nothingOrStatement,
-    method: 'select' | 'with' | 'withRecursive'
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement:
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void)
+      | undefined,
+    method: string
   ) {
     const [query, columnList] =
       typeof nothingOrStatement === 'undefined'
@@ -275,7 +451,24 @@ export default class Builder<E = void> extends EventEmitter {
     );
   }
 
-  with(alias: string, statementOrColumnList, nothingOrStatement) {
+  with(
+    alias: string,
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  with(
+    alias: string,
+    columns: string[],
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  with(
+    alias: string,
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ) {
     this._validateWithArgs(
       alias,
       statementOrColumnList,
@@ -285,43 +478,109 @@ export default class Builder<E = void> extends EventEmitter {
     return this.withWrapped(alias, statementOrColumnList, nothingOrStatement);
   }
 
-  withMaterialized(alias, statementOrColumnList, nothingOrStatement) {
+  withMaterialized(
+    alias: string,
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withMaterialized(
+    alias: string,
+    columns: string[],
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withMaterialized(
+    alias: string,
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this {
     throw new Error('With materialized is not supported by this dialect');
   }
 
-  withNotMaterialized(alias, statementOrColumnList, nothingOrStatement) {
+  withNotMaterialized(
+    alias: string,
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withNotMaterialized(
+    alias: string,
+    columns: string[],
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withNotMaterialized(
+    alias: string,
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this {
     throw new Error('With materialized is not supported by this dialect');
   }
 
   // Helper for compiling any advanced `with` queries.
   withWrapped(
     alias: string,
-    statementOrColumnList,
-    nothingOrStatement,
-    materialized?
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void),
+    materialized?: 'with',
+    recursive?: boolean
   ) {
     const [query, columnList] =
       typeof nothingOrStatement === 'undefined'
-        ? [statementOrColumnList, undefined]
-        : [nothingOrStatement, statementOrColumnList];
-    const statement = {
+        ? [
+            statementOrColumnList as
+              | QueryBuilder
+              | Raw
+              | ((qb: QueryBuilder) => void),
+            undefined,
+          ]
+        : [
+            nothingOrStatement as
+              | QueryBuilder
+              | Raw
+              | ((qb: QueryBuilder) => void),
+            statementOrColumnList as string[],
+          ];
+    this._statements.push({
       grouping: 'with',
       type: 'withWrapped',
       alias: alias,
       columnList,
       value: query,
-    };
-    if (materialized !== undefined) {
-      statement.materialized = materialized;
-    }
-    this._statements.push(statement);
+      materialized,
+      recursive,
+    });
     return this;
   }
 
   // With Recursive
   // ------
 
-  withRecursive(alias: string, statementOrColumnList, nothingOrStatement) {
+  withRecursive(
+    alias: string,
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withRecursive(
+    alias: string,
+    columns: string[],
+    statement: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ): this;
+  withRecursive(
+    alias: string,
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
+  ) {
     this._validateWithArgs(
       alias,
       statementOrColumnList,
@@ -338,31 +597,48 @@ export default class Builder<E = void> extends EventEmitter {
   // Helper for compiling any advanced `withRecursive` queries.
   withRecursiveWrapped(
     alias: string,
-    statementOrColumnList,
-    nothingOrStatement
+    statementOrColumnList:
+      | string[]
+      | QueryBuilder
+      | Raw
+      | ((qb: QueryBuilder) => void),
+    nothingOrStatement?: QueryBuilder | Raw | ((qb: QueryBuilder) => void)
   ) {
-    this.withWrapped(alias, statementOrColumnList, nothingOrStatement);
-    this._statements[this._statements.length - 1].recursive = true;
+    this.withWrapped(
+      alias,
+      statementOrColumnList,
+      nothingOrStatement,
+      undefined,
+      true
+    );
     return this;
   }
 
   // Select
   // ------
 
-  // Adds a column or columns to the list of "columns"
-  // being selected on the query.
-  columns(column) {
-    if (!column && column !== 0) return this;
+  /**
+   * Creates a select query, taking an optional array of columns for the query, eventually defaulting to * if none are specified when the query is built. The response of a select call will resolve with an array of objects selected from the database.
+   *
+   * Specifically set the columns to be selected on a select query, taking an array, an object or a list of column names. Passing an object will automatically alias the columns with the given keys.
+   * @param columns
+   * @returns
+   */
+  columns(...columns: Column[] | [Column[]]) {
+    if (!columns && columns !== 0) return this;
     this._statements.push({
       grouping: 'columns',
-      value: normalizeArr(...arguments),
+      value: normalizeArr(...columns),
     });
     return this;
   }
 
-  // Allow for a sub-select to be explicitly aliased as a column,
-  // without needing to compile the query in a where.
-  as(column) {
+  /**
+   * Allows for aliasing a subquery, taking the string you wish to name the current query. If the query is not a sub-query, it will be ignored.
+   * @param column
+   * @returns
+   */
+  as(column: string) {
     this._single.as = column;
     return this;
   }
@@ -392,13 +668,18 @@ export default class Builder<E = void> extends EventEmitter {
     return this;
   }
 
-  // Sets the `tableName` on the query.
-  // Alias to "from" for select and "into" for insert statements
-  // e.g. builder.insert({a: value}).into('tableName')
-  // `options`: options object containing keys:
-  //   - `only`: whether the query should use SQL's ONLY to not return
-  //           inheriting table data. Defaults to false.
-  table(tableName: string, options: { only?: boolean } = {}) {
+  /**
+   * Sets the `tableName` on the query.
+   * Alias to "from" for select and "into" for insert statements
+   * e.g. builder.insert({a: value}).into('tableName')
+   * `options`: options object containing keys:
+   *   - `only`: whether the query should use SQL's ONLY to not return
+   *           inheriting table data. Defaults to false.
+   * @param tableName
+   * @param options
+   * @returns
+   */
+  table(tableName: string | Raw, options: FromOptions = {}) {
     this._single.table = tableName;
     this._single.only = options.only === true;
     return this;
@@ -431,7 +712,7 @@ export default class Builder<E = void> extends EventEmitter {
   join(table, first, ...args) {
     let join;
     const schema =
-      table instanceof Builder || typeof table === 'function'
+      table instanceof QueryBuilder || typeof table === 'function'
         ? undefined
         : this._single.schema;
     const joinType = this._joinType();
@@ -505,7 +786,11 @@ export default class Builder<E = void> extends EventEmitter {
   // The where function can be used in several ways:
   // The most basic is `where(key, value)`, which expands to
   // where key = value.
-  where(column, operator?, value?) {
+  where(criteria: Record<string, any>): this;
+  where(column: any, value?: any): this;
+  where(column: any, oper: string, value: any): this;
+  where(func: (qb: QueryBuilder) => void): this;
+  where(column: any, operator?: string, value?: any): this {
     const argsLength = arguments.length;
 
     // Support "where true || where false"
@@ -520,11 +805,11 @@ export default class Builder<E = void> extends EventEmitter {
     }
 
     // Allows `where({id: 2})` syntax.
-    if (isObject(column) && !column.isRawInstance)
+    if (isObject(column) && !(column instanceof Raw))
       return this._objectWhere(column);
 
     // Allow a raw statement to be passed along to the query.
-    if (column && column.isRawInstance && argsLength === 1)
+    if (column && column instanceof Raw && argsLength === 1)
       return this.whereRaw(column);
 
     // Enable the where('key', value) syntax, only when there
@@ -571,7 +856,7 @@ export default class Builder<E = void> extends EventEmitter {
       grouping: 'where',
       type: 'whereBasic',
       column,
-      operator,
+      operator: operator ?? '=',
       value,
       not: this._not(),
       bool: this._bool(),
@@ -580,15 +865,15 @@ export default class Builder<E = void> extends EventEmitter {
     return this;
   }
 
-  whereColumn(...args) {
+  private whereColumn(column: any, ...args: any[]) {
     this._asColumnFlag = true;
-    this.where(...args);
+    this.where(column, ...args);
     this._asColumnFlag = false;
     return this;
   }
 
   // Adds an `or where` clause to the query.
-  orWhere(column, ...args) {
+  orWhere(column: any, ...args: any[]) {
     this._bool('or');
     const obj = column;
     if (isObject(obj) && !obj.isRawInstance) {
@@ -601,7 +886,7 @@ export default class Builder<E = void> extends EventEmitter {
     return this.where(column, ...args);
   }
 
-  orWhereColumn(column, ...args) {
+  private orWhereColumn(column: any, ...args: any[]) {
     this._bool('or');
     const obj = column;
     if (isObject(obj) && !obj.isRawInstance) {
@@ -615,7 +900,7 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds an `not where` clause to the query.
-  whereNot(column, ...args) {
+  whereNot(column: any, ...args: any[]) {
     if (args.length >= 2) {
       if (args[0] === 'in' || args[0] === 'between') {
         this.client.logger.warn(
@@ -631,8 +916,8 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds an `or not where` clause to the query.
-  orWhereNot(...args) {
-    return this._bool('or').whereNot(...args);
+  orWhereNot(column: any, ...args: any[]) {
+    return this._bool('or').whereNot(column, ...args);
   }
 
   orWhereNotColumn(...args) {
@@ -640,18 +925,28 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Processes an object literal provided in a "where" clause.
-  _objectWhere(obj) {
-    const boolVal = this._bool();
-    const notVal = this._not() ? 'Not' : '';
-    for (const key in obj) {
-      this[`${boolVal}Where${notVal}`](key, obj[key]);
+  private _objectWhere(obj: Record<string, any>) {
+    // TODO: refactor
+    for (const [key, val] of Object.entries(obj)) {
+      if (this._bool() === 'and')
+        if (this._not()) this.andWhereNot(key, val);
+        else this.andWhere(key, val);
+      else if (this._not()) this.orWhereNot(key, val);
+      else this.orWhere(key, val);
     }
     return this;
+
+    // const boolVal = this._bool();
+    // const notVal = this._not() ? 'Not' : '';
+    // for (const key in obj) {
+    //   this[`${boolVal}Where${notVal}`](key, obj[key]);
+    // }
+    // return this;
   }
 
   // Adds a raw `where` clause to the query.
-  whereRaw(sql, bindings?) {
-    const raw = sql.isRawInstance ? sql : this.client.raw(sql, bindings);
+  whereRaw(sql: string | Raw, bindings?: any) {
+    const raw = sql instanceof Raw ? sql : this.client.raw(sql, bindings);
     this._statements.push({
       grouping: 'where',
       type: 'whereRaw',
@@ -662,12 +957,12 @@ export default class Builder<E = void> extends EventEmitter {
     return this;
   }
 
-  orWhereRaw(sql, bindings) {
+  orWhereRaw(sql: string | Raw, bindings?: any) {
     return this._bool('or').whereRaw(sql, bindings);
   }
 
   // Helper for compiling any advanced `where` queries.
-  whereWrapped(callback) {
+  whereWrapped(callback: (qb: QueryBuilder) => void) {
     this._statements.push({
       grouping: 'where',
       type: 'whereWrapped',
@@ -679,7 +974,7 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds a `where exists` clause to the query.
-  whereExists(callback) {
+  whereExists(callback: (qb: QueryBuilder) => void) {
     this._statements.push({
       grouping: 'where',
       type: 'whereExists',
@@ -691,22 +986,22 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds an `or where exists` clause to the query.
-  orWhereExists(callback) {
+  orWhereExists(callback: (qb: QueryBuilder) => void) {
     return this._bool('or').whereExists(callback);
   }
 
   // Adds a `where not exists` clause to the query.
-  whereNotExists(callback) {
+  whereNotExists(callback: (qh: QueryBuilder) => void) {
     return this._not(true).whereExists(callback);
   }
 
   // Adds a `or where not exists` clause to the query.
-  orWhereNotExists(callback) {
+  orWhereNotExists(callback: (qb: QueryBuilder) => void) {
     return this._bool('or').whereNotExists(callback);
   }
 
   // Adds a `where in` clause to the query.
-  whereIn(column, values) {
+  whereIn(column: any, values: any) {
     if (Array.isArray(values) && isEmpty(values))
       return this.where(this._not());
     this._statements.push({
@@ -736,7 +1031,7 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds a `where null` clause to the query.
-  whereNull(column) {
+  whereNull(column: any) {
     this._statements.push({
       grouping: 'where',
       type: 'whereNull',
@@ -748,22 +1043,22 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds a `or where null` clause to the query.
-  orWhereNull(column) {
+  orWhereNull(column: any) {
     return this._bool('or').whereNull(column);
   }
 
   // Adds a `where not null` clause to the query.
-  whereNotNull(column) {
+  whereNotNull(column: any) {
     return this._not(true).whereNull(column);
   }
 
   // Adds a `or where not null` clause to the query.
-  orWhereNotNull(column) {
+  orWhereNotNull(column: any) {
     return this._bool('or').whereNotNull(column);
   }
 
   // Adds a `where between` clause to the query.
-  whereBetween(column, values) {
+  whereBetween(column: any, values: [any, any]) {
     assert(
       Array.isArray(values),
       'The second argument to whereBetween must be an array.'
@@ -784,26 +1079,30 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds a `where not between` clause to the query.
-  whereNotBetween(column, values) {
+  whereNotBetween(column: any, values: [any, any]) {
     return this._not(true).whereBetween(column, values);
   }
 
   // Adds a `or where between` clause to the query.
-  orWhereBetween(column, values) {
+  orWhereBetween(column: any, values: [any, any]) {
     return this._bool('or').whereBetween(column, values);
   }
 
   // Adds a `or where not between` clause to the query.
-  orWhereNotBetween(column, values) {
+  orWhereNotBetween(column: any, values: [any, any]) {
     return this._bool('or').whereNotBetween(column, values);
   }
 
-  _whereLike(type, column, value) {
+  private _whereLike(
+    type: 'whereLike' | 'whereILike',
+    column: any,
+    value: any
+  ) {
     this._statements.push({
       grouping: 'where',
-      type: type,
+      type,
       column,
-      value: value,
+      value,
       not: this._not(),
       bool: this._bool(),
       asColumn: this._asColumnFlag,
@@ -812,12 +1111,12 @@ export default class Builder<E = void> extends EventEmitter {
   }
 
   // Adds a `where like` clause to the query.
-  whereLike(column, value) {
+  whereLike(column: any, value: any) {
     return this._whereLike('whereLike', column, value);
   }
 
   // Adds a `where ilike` clause to the query.
-  whereILike(column, value) {
+  whereILike(column: any, value: any) {
     return this._whereLike('whereILike', column, value);
   }
 
@@ -1142,7 +1441,7 @@ export default class Builder<E = void> extends EventEmitter {
 
   // Only allow a single "offset" to be set for the current query.
   offset(value, options) {
-    if (value == null || value.isRawInstance || value instanceof Builder) {
+    if (value == null || value.isRawInstance || value instanceof QueryBuilder) {
       // Builder for backward compatibility
       this._single.offset = value;
     } else {
@@ -1494,8 +1793,8 @@ export default class Builder<E = void> extends EventEmitter {
     return this;
   }
 
-  fromRaw(sql, bindings) {
-    const raw = sql.isRawInstance ? sql : this.client.raw(sql, bindings);
+  fromRaw(sql: string | Raw, bindings: any) {
+    const raw = sql instanceof Raw ? sql : this.client.raw(sql, bindings);
     return this.from(raw);
   }
 
@@ -1523,80 +1822,156 @@ export default class Builder<E = void> extends EventEmitter {
     return this;
   }
 
-  jsonExtract() {
-    const column = arguments[0];
-    let path;
-    let alias;
-    let singleValue = true;
+  jsonExtract(
+    column: string | QueryBuilder | Raw,
+    path?: string,
+    alias?: string,
+    singleValue?: boolean
+  ): this;
+  jsonExtract(
+    args: [column: string | QueryBuilder | Raw, path?: string, alias?: string],
+    singleValue?: boolean
+  ): this;
+  jsonExtract(...args: any[]): this {
+    let params: [
+      column: string | QueryBuilder | Raw,
+      path: string,
+      alias?: string,
+      singleValue?: boolean
+    ][];
+    if (Array.isArray(args[0])) {
+      params = args[0].map((arg) => [arg[0], arg[1], arg[2], args[1]]);
+    } else {
+      params = [args[0], args[1], args[2], args[3]];
+    }
 
-    // We use arguments to have the signatures :
-    // - column (string or array)
-    // - column + path
-    // - column + path + alias
-    // - column + path + alias + singleValue
-    // - column array + singleValue
-    if (arguments.length >= 2) {
-      path = arguments[1];
-    }
-    if (arguments.length >= 3) {
-      alias = arguments[2];
-    }
-    if (arguments.length === 4) {
-      singleValue = arguments[3];
-    }
-    if (
-      arguments.length === 2 &&
-      Array.isArray(arguments[0]) &&
-      isBoolean(arguments[1])
-    ) {
-      singleValue = arguments[1];
-    }
-    return this._json('jsonExtract', {
-      column: column,
-      path: path,
-      alias: alias,
-      singleValue, // boolean used only in MSSQL to use function for extract value instead of object/array.
+    this._statements.push({
+      grouping: 'columns',
+      type: 'json',
+      method: 'jsonExtract',
+      params,
     });
+    return this;
+
+    // const column = arguments[0];
+    // let path;
+    // let alias;
+    // let singleValue = true;
+
+    // // We use arguments to have the signatures :
+    // // - column (string or array)
+    // // - column + path
+    // // - column + path + alias
+    // // - column + path + alias + singleValue
+    // // - column array + singleValue
+    // if (arguments.length >= 2) {
+    //   path = arguments[1];
+    // }
+    // if (arguments.length >= 3) {
+    //   alias = arguments[2];
+    // }
+    // if (arguments.length === 4) {
+    //   singleValue = arguments[3];
+    // }
+    // if (
+    //   arguments.length === 2 &&
+    //   Array.isArray(arguments[0]) &&
+    //   isBoolean(arguments[1])
+    // ) {
+    //   singleValue = arguments[1];
+    // }
+    // return this._json('jsonExtract', {
+    //   column: column,
+    //   path: path,
+    //   alias: alias,
+    //   singleValue, // boolean used only in MSSQL to use function for extract value instead of object/array.
+    // });
   }
 
-  jsonSet(column, path, value, alias) {
-    return this._json('jsonSet', {
-      column: column,
-      path: path,
-      value: value,
-      alias: alias,
+  jsonSet(
+    column: string | QueryBuilder | Raw,
+    path: string,
+    value: any,
+    alias?: string
+  ) {
+    this._statements.push({
+      grouping: 'columns',
+      type: 'json',
+      method: 'jsonSet',
+      column,
+      path,
+      value,
+      alias,
     });
+    return this;
+
+    // return this._json('jsonSet', {
+    //   column: column,
+    //   path: path,
+    //   value: value,
+    //   alias: alias,
+    // });
   }
 
-  jsonInsert(column, path, value, alias) {
-    return this._json('jsonInsert', {
-      column: column,
-      path: path,
-      value: value,
-      alias: alias,
+  jsonInsert(
+    column: string | QueryBuilder | Raw,
+    path: string,
+    value: any,
+    alias?: string
+  ) {
+    this._statements.push({
+      grouping: 'columns',
+      type: 'json',
+      method: 'jsonInsert',
+      column,
+      path,
+      value,
+      alias,
     });
+    return this;
+
+    // return this._json('jsonInsert', {
+    //   column: column,
+    //   path: path,
+    //   value: value,
+    //   alias: alias,
+    // });
   }
 
-  jsonRemove(column, path, alias) {
-    return this._json('jsonRemove', {
-      column: column,
-      path: path,
-      alias: alias,
+  jsonRemove(
+    column: string | QueryBuilder | Raw,
+    path: string,
+    alias?: string
+  ) {
+    this._statements.push({
+      grouping: 'columns',
+      type: 'json',
+      method: 'jsonRemove',
+      column,
+      path,
+      alias,
     });
+    return this;
+
+    // return this._json('jsonRemove', {
+    //   column: column,
+    //   path: path,
+    //   alias: alias,
+    // });
   }
 
   // Wheres for JSON
-  _isJsonObject(jsonValue) {
-    return isObject(jsonValue) && !(jsonValue instanceof Builder);
+  private _isJsonObject(jsonValue) {
+    return isObject(jsonValue) && !(jsonValue instanceof QueryBuilder);
   }
 
-  _whereJsonWrappedValue(type, column, value, operator?, jsonPath?) {
+  private _whereJsonWrappedValue(type, column, value, operator?, jsonPath?) {
     const whereJsonClause = Object.assign(
       {
         grouping: 'where' as const,
         type: type,
         column,
-        value: value,
+        value,
         not: this._not(),
         bool: this._bool(),
         asColumn: this._asColumnFlag,
@@ -1607,79 +1982,115 @@ export default class Builder<E = void> extends EventEmitter {
     this._statements.push(whereJsonClause);
   }
 
-  whereJsonObject(column, value) {
-    this._whereJsonWrappedValue('whereJsonObject', column, value);
+  whereJsonObject(column: any, value: any) {
+    this._statements.push({
+      grouping: 'where',
+      type: 'whereJsonObject',
+      column,
+      value,
+      not: this._not(),
+      bool: this._bool(),
+      asColumn: this._asColumnFlag,
+    })
     return this;
   }
 
-  orWhereJsonObject(column, operator, value) {
-    return this._bool('or').whereJsonObject(column, operator, value);
+  orWhereJsonObject(column: any, value: any) {
+    return this._bool('or').whereJsonObject(column, value);
   }
 
-  whereNotJsonObject(column, value) {
-    this._not(true)._whereJsonWrappedValue('whereJsonObject', column, value);
+  whereNotJsonObject(column: any, value: any) {
+    return this._not(true).whereJsonObject(column, value);
+  }
+
+  orWhereNotJsonObject(column: any, value: any) {
+    return this._not(true)._bool('or').whereJsonObject(column, value);
+  }
+
+  whereJsonPath(column: any, jsonPath: string, operator: string, value: any) {
+    this._statements.push({
+      grouping: 'where',
+      type: 'whereJsonPath',
+      column,
+      value,
+      not: this._not(),
+      bool: this._bool(),
+      asColumn: this._asColumnFlag,
+      operator,
+      jsonPath,
+    })
     return this;
   }
 
-  orWhereNotJsonObject(column, operator, value) {
-    return this._not(true)._bool('or').whereJsonObject(column, operator, value);
+  orWhereJsonPath(column: any, jsonPath: string, operator: string, value: any) {
+    return this._bool('or').whereJsonPath(column, jsonPath, operator, value);
   }
 
-  whereJsonPath(column, path, operator, value) {
-    this._whereJsonWrappedValue('whereJsonPath', column, value, operator, path);
-    return this;
+  whereNotJsonPath(column: any, jsonPath: string, operator: string, value: any) {
+    return this._not(true).whereJsonPath(column, jsonPath, operator, value);
   }
 
-  orWhereJsonPath(column, operator, value) {
-    return this._bool('or').whereJsonPath(column, operator, value);
+  orWhereNotJsonPath(column: any, jsonPath: string, operator: string, value: any) {
+    return this._not(true)._bool('or').whereJsonPath(column, jsonPath, operator, value);
   }
 
   // Json superset wheres
-  whereJsonSupersetOf(column, value) {
-    this._whereJsonWrappedValue('whereJsonSupersetOf', column, value);
+  whereJsonSupersetOf(column: any, value: any) {
+    this._statements.push({
+      grouping: 'where',
+      type: 'whereJsonSupersetOf',
+      column,
+      value,
+      not: this._not(),
+      bool: this._bool(),
+      asColumn: this._asColumnFlag,
+    })
     return this;
   }
 
-  whereJsonNotSupersetOf(column, value) {
-    this._not(true).whereJsonSupersetOf(column, value);
-    return this;
+  whereJsonNotSupersetOf(column: any, value: any) {
+    return this._not(true).whereJsonSupersetOf(column, value);
   }
 
-  orWhereJsonSupersetOf(column, value) {
-    this._whereJsonWrappedValue('whereJsonSupersetOf', column, value);
-    return this;
+  orWhereJsonSupersetOf(column: any, value: any) {
+    return this._bool('or').whereJsonSubsetOf(column, value);
   }
 
-  orWhereJsonNotSupersetOf(column, value) {
-    this._not(true)._bool('or').whereJsonSupersetOf(column, value);
-    return this;
+  orWhereJsonNotSupersetOf(column: any, value: any) {
+    return this._not(true)._bool('or').whereJsonSupersetOf(column, value);
   }
 
   // Json subset wheres
-  whereJsonSubsetOf(column, value) {
-    this._whereJsonWrappedValue('whereJsonSubsetOf', column, value);
+  whereJsonSubsetOf(column: any, value: any) {
+    this._statements.push({
+      grouping: 'where',
+      type: 'whereJsonSubsetOf',
+      column,
+      value,
+      not: this._not(),
+      bool: this._bool(),
+      asColumn: this._asColumnFlag,
+    })
     return this;
   }
 
-  whereJsonNotSubsetOf(column, value) {
-    this._not(true).whereJsonSubsetOf(column, value);
-    return this;
+  whereJsonNotSubsetOf(column: any, value: any) {
+    return this._not(true).whereJsonSubsetOf(column, value);
   }
 
-  orWhereJsonSubsetOf(column, value) {
-    this._whereJsonWrappedValue('whereJsonSubsetOf', column, value);
-    return this;
+  orWhereJsonSubsetOf(column: any, value: any) {
+    return this._bool('or').whereJsonSubsetOf(column, value);
   }
 
-  orWhereJsonNotSubsetOf(column, value) {
-    this._not(true)._bool('or').whereJsonSubsetOf(column, value);
-    return this;
+  orWhereJsonNotSubsetOf(column: any, value: any) {
+    return this._not(true)._bool('or').whereJsonSubsetOf(column, value);
   }
 
-  whereJsonHasNone(column, values) {
-    this._not(true).whereJsonHasAll(column, values);
-    return this;
-  }
+  // TODO: This looks like a mistake
+  // whereJsonHasNone(column, values) {
+  //   this._not(true).whereJsonHasAll(column, values);
+  //   return this;
+  // }
 
   // end of wheres for JSON
 
@@ -1769,7 +2180,7 @@ export default class Builder<E = void> extends EventEmitter {
   _bool(): 'and' | 'or';
   _bool(val?: 'and' | 'or'): this | 'and' | 'or' {
     if (arguments.length === 1) {
-      this._boolFlag = val;
+      this._boolFlag = val!;
       return this;
     }
     const ret = this._boolFlag;
@@ -1878,10 +2289,10 @@ export default class Builder<E = void> extends EventEmitter {
 
   // Sub-builder for onConflict clauses
   public static OnConflictBuilder = class {
-    builder: Builder;
+    builder: QueryBuilder;
     private _columns: unknown;
 
-    constructor(builder: Builder, columns: unknown) {
+    constructor(builder: QueryBuilder, columns: unknown) {
       this.builder = builder;
       this._columns = columns;
     }
@@ -1910,17 +2321,19 @@ export default class Builder<E = void> extends EventEmitter {
 }
 
 // Attach all of the top level promise methods that should be chainable.
-augmentWithBuilderInterface(Builder);
-addQueryContext(Builder);
+augmentWithBuilderInterface(QueryBuilder);
+addQueryContext(QueryBuilder);
 
-Object.assign(Builder, {
+Object.assign(QueryBuilder, {
   extend: (methodName: string, fn: Function) => {
-    if (Object.prototype.hasOwnProperty.call(Builder.prototype, methodName)) {
+    if (
+      Object.prototype.hasOwnProperty.call(QueryBuilder.prototype, methodName)
+    ) {
       throw new Error(
         `Can't extend QueryBuilder with existing method ('${methodName}').`
       );
     }
 
-    assign(Builder.prototype, { [methodName]: fn });
+    assign(QueryBuilder.prototype, { [methodName]: fn });
   },
 });

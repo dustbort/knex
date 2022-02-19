@@ -5,12 +5,11 @@ import { isFunction } from './is';
 
 // Check if the first argument is an array, otherwise uses all arguments as an
 // array.
-export function normalizeArr(...args: any[]) {
+export function normalizeArr<T>(...args: T[] | [T[]]) {
   if (Array.isArray(args[0])) {
     return args[0];
   }
-
-  return args;
+  return args as T[];
 }
 
 export function containsUndefined(mixed) {
@@ -63,17 +62,37 @@ export function getUndefinedIndices(mixed) {
   return indices;
 }
 
-export function addQueryContext(Target) {
-  // Stores or returns (if called with no arguments) context passed to
-  // wrapIdentifier and postProcessResponse hooks
-  Target.prototype.queryContext = function (context) {
-    if (context === undefined) {
-      return this._queryContext;
-    }
-    this._queryContext = context;
-    return this;
-  };
+export function queryContext(context: string) {
+  if (context === undefined) {
+    return this._queryContext;
+  }
+  this._queryContext = context;
+  return this;
 }
+
+export function addQueryContext<T extends new (...args: any[]) => Object>(Target: T) {
+  return class extends Target {
+    queryContext(context) {
+      if (context === undefined) {
+        return this._queryContext;
+      }
+      this._queryContext = context;
+      return this;
+    }
+  }
+}
+
+// export function addQueryContext(Target) {
+//   // Stores or returns (if called with no arguments) context passed to
+//   // wrapIdentifier and postProcessResponse hooks
+//   Target.prototype.queryContext = function (context) {
+//     if (context === undefined) {
+//       return this._queryContext;
+//     }
+//     this._queryContext = context;
+//     return this;
+//   };
+// }
 
 export function resolveClientNameWithAliases(clientName: string) {
   return CLIENT_ALIASES[clientName] ?? clientName;

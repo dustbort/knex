@@ -2,17 +2,18 @@
 // Used for designating column definitions
 // during the table "create" / "alter" statements.
 // -------
-const helpers = require('./internal/helpers');
-const groupBy = require('lodash/groupBy');
-const first = require('lodash/first');
-const has = require('lodash/has');
-const tail = require('lodash/tail');
-const { toNumber } = require('../util/helpers');
-const { formatDefault } = require('../formatter/formatterUtils');
-const { operator: operator_ } = require('../formatter/wrappingFormatter');
+import * as helpers from './internal/helpers';
+import groupBy from 'lodash/groupBy';
+import first from 'lodash/first';
+import has from 'lodash/has';
+import tail from 'lodash/tail';
+import { toNumber } from '../util/helpers';
+import { formatDefault } from '../formatter/formatterUtils';
+import { operator as operator_ } from '../formatter/wrappingFormatter';
+import Client from '../client';
 
 export default class ColumnCompiler {
-  constructor(client, tableCompiler, columnBuilder) {
+  constructor(client: Client, tableCompiler, columnBuilder) {
     this.client = client;
     this.tableCompiler = tableCompiler;
     this.columnBuilder = columnBuilder;

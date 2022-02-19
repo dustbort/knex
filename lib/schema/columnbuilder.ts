@@ -15,7 +15,7 @@ export default class ColumnBuilder {
   private _args: unknown[];
   private _tableBuilder: TableBuilder;
 
-  constructor(client: Client, tableBuilder: TableBuilder, type, args) {
+  constructor(client: Client, tableBuilder: TableBuilder, type: string, args: any[]) {
     this.client = client;
     this._method = 'add';
     this._single = {};

@@ -13,25 +13,33 @@ import Client from '../client';
 import * as helpers from '../util/helpers';
 import { isString, isFunction, isObject } from '../util/is';
 
+// TODO: infer types
+export type TableBuilderMethod = 'alter'
+export type TableBuilderTableName = 'string';
+export type TableBuilderTableNameLike = 'string';
+export type TableBuilderFn = (tableBuilder: TableBuilder) => void;
+
 export default class TableBuilder {
   client: Client;
-  private _fn: unknown;
-  private _method: unknown;
-  private _schemaName?: unknown;
+  private _fn: TableBuilderFn;
+  private _method: TableBuilderMethod;
+  private _schemaName?: string = undefined;
   private _tableName: unknown;
   private _tableNameLike: unknown;
-  private _statements: unknown[];
-  private _single: unknown;
+  private _statements: {
+    grouping: 'alterTable',
+    method: unknown,
+    args: any[]
+  }[] = [];
+  private _single: unknown = {};
+  private _queryContext: unknown;
 
-  constructor(client: Client, method, tableName, tableNameLike, fn) {
+  constructor(client: Client, method: TableBuilderMethod, tableName: TableBuilderTableName, tableNameLike: TableBuilderTableNameLike, fn: TableBuilderFn) {
     this.client = client;
     this._fn = fn;
     this._method = method;
-    this._schemaName = undefined;
     this._tableName = tableName;
     this._tableNameLike = tableNameLike;
-    this._statements = [];
-    this._single = {};
 
     if (!tableNameLike && !isFunction(this._fn)) {
       throw new TypeError(
@@ -41,7 +49,7 @@ export default class TableBuilder {
     }
   }
 
-  setSchema(schemaName) {
+  setSchema(schemaName: string) {
     this._schemaName = schemaName;
   }
 
@@ -164,140 +172,392 @@ export default class TableBuilder {
     });
     return this;
   }
+
+  //#region indexes
+  private idx(method: unknown) {
+    return (...args: any[]) => {
+      this._statements.push({
+        grouping: 'alterTable',
+        method,
+        args
+      })
+      return this;
+    }
+  }
+
+  get index() {
+    return this.idx('index').bind(this);
+  }
+  get primary() {
+    return this.idx('primary').bind(this);
+  }
+  get unique() {
+    return this.idx('unique').bind(this);
+  }
+  get dropPrimary() {
+    return this.idx('dropPrimary').bind(this);
+  }
+  get dropUnique() {
+    return this.idx('dropUnique').bind(this);
+  }
+  get dropIndex() {
+    return this.idx('dropIndex').bind(this);
+  }
+  get dropForeign() {
+    return this.idx('dropForeign').bind(this);
+  }
+  //#endregion indexes
+
+  //#region dialect-specific table methods
+  private tab(dialect: string, method: string, ) {
+    if (this.client.dialect !== dialect) {
+      throw new Error(
+        `Knex only supports ${method} statement with ${dialect}.`
+      );
+    }
+    if (this._method === 'alter') {
+      throw new Error(
+        `Knex does not support altering the ${method} outside of create ` +
+          `table, please use knex.raw statement.`
+      );
+    }
+    this._single[method] = value;
+  }
+  engine(value: string) {
+    this.tab('mysql', 'engine');
+  }
+  charset(value: string) {
+    this.tab('mysql', 'charset');
+  }
+  collate(value: string) {
+    this.tab('mysql', 'collate');
+  }
+  inherits(value: string) {
+    this.tab('postgresql', 'inherits');
+  }
+  //#endriong dialect-specific table methods
+
+  //#region query context
+  queryContext(context) {
+    if (typeof context === "undefined") {
+      return this._queryContext;
+    }
+    this._queryContext = context;
+    return this;
+  }
+  //#end region query context
+
+
+  //#region column types
+  private col(type: string) {
+    return (...args: any[]) => {
+      const builder = this.client.columnBuilder(this, type, args);
+      this._statements.push({
+        grouping: 'columns',
+        builder
+      });
+      return builder;
+    }
+  }
+
+  get tinyint() {
+    return this.col('tinyint').bind(this);
+  }
+  get smallint() {
+    return this.col('smallint').bind(this);
+  }
+  get mediumint() {
+    return this.col('mediumint').bind(this);
+  }
+  get int() {
+    return this.col('int').bind(this);
+  }
+  get bigint() {
+    return this.col('bigint').bind(this);
+  }
+  get decimal() {
+    return this.col('decimal').bind(this);
+  }
+  get float() {
+    return this.col('float').bind(this);
+  }
+  get double () {
+    return this.col('double').bind(this);
+  }
+  get real() {
+    return this.col('real').bind(this);
+  }
+  get bit() {
+    return this.col('bit').bind(this);
+  }
+  get boolean() {
+    return this.col('boolean').bind(this);
+  }
+  get serial() {
+    return this.col('serial').bind(this);
+  }
+  get date() {
+    return this.col('date').bind(this);
+  }
+  get datetime() {
+    return this.col('datetime').bind(this);
+  }
+  get timestamp() {
+    return this.col('timestamp').bind(this);
+  }
+  get time() {
+    return this.col('time').bind(this);
+  }
+  get year() {
+    return this.col('year').bind(this);
+  }
+  get geometry() {
+    return this.col('geometry').bind(this);
+  }
+  get geography() {
+    return this.col('geography').bind(this);
+  }
+  get point() {
+    return this.col('point').bind(this);
+  }
+  get char() {
+    return this.col('char').bind(this);
+  }
+  get varchar() {
+    return this.col('varchar').bind(this);
+  }
+  get tinytext() {
+    return this.col('tinytext').bind(this);
+  }
+  get tinyText() {
+    return this.col('tinyText').bind(this);
+  }
+  get text() {
+    return this.col('text').bind(this);
+  }
+  get mediumtext() {
+    return this.col('mediumtext').bind(this);
+  }
+  get mediumText() {
+    return this.col('mediumText').bind(this);
+  }
+  get longtext() {
+    return this.col('longtext').bind(this);
+  }
+  get longText() {
+    return this.col('longText').bind(this);
+  }
+  get binary() {
+    return this.col('binary').bind(this);
+  }
+  get varbinary() {
+    return this.col('varbinary').bind(this);
+  }
+  get tinyblob() {
+    return this.col('tinyblob').bind(this);
+  }
+  get tinyBlob() {
+    return this.col('tinyBlob').bind(this);
+  }
+  get mediumblob() {
+    return this.col('mediumblob').bind(this);
+  }
+  get mediumBlob() {
+    return this.col('mediumBlob').bind(this);
+  }
+  get blob() {
+    return this.col('blob').bind(this);
+  }
+  get longblob() {
+    return this.col('longblob').bind(this);
+  }
+  get longBlob() {
+    return this.col('longBlob').bind(this);
+  }
+  get enum() {
+    return this.col('enum').bind(this);
+  }
+  get set() {
+    return this.col('set').bind(this);
+  }
+  get bool() {
+    return this.col('bool').bind(this);
+  }
+  get dateTime() {
+    return this.col('dateTime').bind(this);
+  }
+  get increments() {
+    return this.col('increments').bind(this);
+  }
+  get bigincrements() {
+    return this.col('bigincrements').bind(this);
+  }
+  get bigIncrements() {
+    return this.col('bigIncrements').bind(this);
+  }
+  get integer() {
+    return this.col('integer').bind(this);
+  }
+  get biginteger() {
+    return this.col('biginteger').bind(this);
+  }
+  get bigInteger() {
+    return this.col('bigInteger').bind(this);
+  }
+  get string() {
+    return this.col('string').bind(this);
+  }
+  get json() {
+    return this.col('json').bind(this);
+  }
+  get jsonb() {
+    return this.col('jsonb').bind(this);
+  }
+  get uuid() {
+    return this.col('uuid').bind(this);
+  }
+  get enu() {
+    return this.col('enu').bind(this);
+  }
+  get specificType() {
+    return this.col('specificType').bind(this);
+  }
+  //#endregion column types
+
 }
 
-[
-  // Each of the index methods can be called individually, with the
-  // column name to be used, e.g. table.unique('column').
-  'index',
-  'primary',
-  'unique',
+// [
+//   // Each of the index methods can be called individually, with the
+//   // column name to be used, e.g. table.unique('column').
+//   'index',
+//   'primary',
+//   'unique',
 
-  // Key specific
-  'dropPrimary',
-  'dropUnique',
-  'dropIndex',
-  'dropForeign',
-].forEach((method) => {
-  TableBuilder.prototype[method] = function () {
-    this._statements.push({
-      grouping: 'alterTable',
-      method,
-      args: toArray(arguments),
-    });
-    return this;
-  };
-});
+//   // Key specific
+//   'dropPrimary',
+//   'dropUnique',
+//   'dropIndex',
+//   'dropForeign',
+// ].forEach((method) => {
+//   TableBuilder.prototype[method] = function () {
+//     this._statements.push({
+//       grouping: 'alterTable',
+//       method,
+//       args: toArray(arguments),
+//     });
+//     return this;
+//   };
+// });
 
-// Warn for dialect-specific table methods, since that's the
-// only time these are supported.
-const specialMethods = {
-  mysql: ['engine', 'charset', 'collate'],
-  postgresql: ['inherits'],
-};
-each(specialMethods, function (methods, dialect) {
-  methods.forEach(function (method) {
-    TableBuilder.prototype[method] = function (value) {
-      if (this.client.dialect !== dialect) {
-        throw new Error(
-          `Knex only supports ${method} statement with ${dialect}.`
-        );
-      }
-      if (this._method === 'alter') {
-        throw new Error(
-          `Knex does not support altering the ${method} outside of create ` +
-            `table, please use knex.raw statement.`
-        );
-      }
-      this._single[method] = value;
-    };
-  });
-});
+// // Warn for dialect-specific table methods, since that's the
+// // only time these are supported.
+// const specialMethods = {
+//   mysql: ['engine', 'charset', 'collate'],
+//   postgresql: ['inherits'],
+// };
+// each(specialMethods, function (methods, dialect) {
+//   methods.forEach(function (method) {
+//     TableBuilder.prototype[method] = function (value) {
+//       if (this.client.dialect !== dialect) {
+//         throw new Error(
+//           `Knex only supports ${method} statement with ${dialect}.`
+//         );
+//       }
+//       if (this._method === 'alter') {
+//         throw new Error(
+//           `Knex does not support altering the ${method} outside of create ` +
+//             `table, please use knex.raw statement.`
+//         );
+//       }
+//       this._single[method] = value;
+//     };
+//   });
+// });
 
-helpers.addQueryContext(TableBuilder);
+// helpers.addQueryContext(TableBuilder);
 
-// Each of the column types that we can add, we create a new ColumnBuilder
-// instance and push it onto the statements array.
-const columnTypes = [
-  // Numeric
-  'tinyint',
-  'smallint',
-  'mediumint',
-  'int',
-  'bigint',
-  'decimal',
-  'float',
-  'double',
-  'real',
-  'bit',
-  'boolean',
-  'serial',
+// // Each of the column types that we can add, we create a new ColumnBuilder
+// // instance and push it onto the statements array.
+// const columnTypes = [
+//   // Numeric
+//   'tinyint',
+//   'smallint',
+//   'mediumint',
+//   'int',
+//   'bigint',
+//   'decimal',
+//   'float',
+//   'double',
+//   'real',
+//   'bit',
+//   'boolean',
+//   'serial',
 
-  // Date / Time
-  'date',
-  'datetime',
-  'timestamp',
-  'time',
-  'year',
+//   // Date / Time
+//   'date',
+//   'datetime',
+//   'timestamp',
+//   'time',
+//   'year',
 
-  // Geometry
-  'geometry',
-  'geography',
-  'point',
+//   // Geometry
+//   'geometry',
+//   'geography',
+//   'point',
 
-  // String
-  'char',
-  'varchar',
-  'tinytext',
-  'tinyText',
-  'text',
-  'mediumtext',
-  'mediumText',
-  'longtext',
-  'longText',
-  'binary',
-  'varbinary',
-  'tinyblob',
-  'tinyBlob',
-  'mediumblob',
-  'mediumBlob',
-  'blob',
-  'longblob',
-  'longBlob',
-  'enum',
-  'set',
+//   // String
+//   'char',
+//   'varchar',
+//   'tinytext',
+//   'tinyText',
+//   'text',
+//   'mediumtext',
+//   'mediumText',
+//   'longtext',
+//   'longText',
+//   'binary',
+//   'varbinary',
+//   'tinyblob',
+//   'tinyBlob',
+//   'mediumblob',
+//   'mediumBlob',
+//   'blob',
+//   'longblob',
+//   'longBlob',
+//   'enum',
+//   'set',
 
-  // Increments, Aliases, and Additional
-  'bool',
-  'dateTime',
-  'increments',
-  'bigincrements',
-  'bigIncrements',
-  'integer',
-  'biginteger',
-  'bigInteger',
-  'string',
-  'json',
-  'jsonb',
-  'uuid',
-  'enu',
-  'specificType',
-];
+//   // Increments, Aliases, and Additional
+//   'bool',
+//   'dateTime',
+//   'increments',
+//   'bigincrements',
+//   'bigIncrements',
+//   'integer',
+//   'biginteger',
+//   'bigInteger',
+//   'string',
+//   'json',
+//   'jsonb',
+//   'uuid',
+//   'enu',
+//   'specificType',
+// ];
 
-// For each of the column methods, create a new "ColumnBuilder" interface,
-// push it onto the "allStatements" stack, and then return the interface,
-// with which we can add indexes, etc.
-columnTypes.forEach((type) => {
-  TableBuilder.prototype[type] = function () {
-    const args = toArray(arguments);
-    const builder = this.client.columnBuilder(this, type, args);
-    this._statements.push({
-      grouping: 'columns',
-      builder,
-    });
-    return builder;
-  };
-});
+// // For each of the column methods, create a new "ColumnBuilder" interface,
+// // push it onto the "allStatements" stack, and then return the interface,
+// // with which we can add indexes, etc.
+// columnTypes.forEach((type) => {
+//   TableBuilder.prototype[type] = function () {
+//     const args = toArray(arguments);
+//     const builder = this.client.columnBuilder(this, type, args);
+//     this._statements.push({
+//       grouping: 'columns',
+//       builder,
+//     });
+//     return builder;
+//   };
+// });
 
 const AlterMethods = {
   // Renames the current column `from` the current
